@@ -1,9 +1,134 @@
+# Gradle
 .gradle/
-build/
-out/
+/build/
+/.gradle-cache/
+
+# Java build outputs
+/bin/
+/out/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+hs_err_pid*
+replay_pid*
+javac.*.args
+
+# Keep the Gradle wrapper JAR tracked
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDEs and editors
 .idea/
 *.iml
-.vscode/
+*.ipr
+*.iws
+.vscode/*
+!.vscode/extensions.json
 
+# Eclipse
+.project
+.classpath
+.settings/
+.factorypath
+.springBeans
+.sts4-cache/
+
+# NetBeans
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+# Operating systems
+*~
+.directory
+.Trash-*
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+Thumbs.db
+Thumbs.db:encryptable
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Environment files and local credentials
 .env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+secrets/
+credentials/
+private/
+.github-token
+token.txt
+credentials.json
+application-local.properties
+application-local.yml
+application-local.yaml
+
+# Logs and debugging output
 *.log
+logs/
+log/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+debug/
+*.dump
+*.stackdump
+
+# Temporary files and caches
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+*.orig
+*.swp
+*.swo
+*.swn
+*.cache
+*.pid
+*.pid.lock
+tmp/
+temp/
+.cache/
+
+# Frontend dependencies and generated output
+node_modules/
+bower_components/
+dist/
+coverage/
+.npm/
+.yarn/
+.pnpm-store/
+
+# Test reports and coverage data
+test-results/
+junit/
+reports/
+*.exec
+
+# Local database files
+*.db
+*.sqlite
+*.sqlite3
+*.mv.db
+local-data/
+
+# Generated documentation
+/docs/generated/
+site/
