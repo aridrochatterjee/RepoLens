@@ -127,6 +127,14 @@ public class WebServer {
             );
 
             server.createContext(
+                    "/api/repository/codebase",
+                    exchange -> authenticatedRepositoryInsight(
+                            exchange,
+                            repositoryController::getCodebaseAnalysis
+                    )
+            );
+
+            server.createContext(
                     "/api/repository",
                     this::authenticatedRepository
             );

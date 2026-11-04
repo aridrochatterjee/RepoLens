@@ -6,6 +6,7 @@ import com.repolens.auth.GitHubOAuthService;
 import com.repolens.client.GitHubApiException;
 import com.repolens.model.Repository;
 import com.repolens.service.RepositoryService;
+import com.repolens.service.CodebaseAnalysisService;
 import com.sun.net.httpserver.HttpExchange;
 
 import java.io.IOException;
@@ -19,10 +20,19 @@ import java.util.function.Function;
 public class RepositoryController {
 
     private final RepositoryService repositoryService;
+    private final CodebaseAnalysisService codebaseAnalysisService;
     private final ObjectMapper objectMapper;
 
     public RepositoryController(RepositoryService repositoryService) {
+        this(repositoryService, null);
+    }
+
+    public RepositoryController(
+            RepositoryService repositoryService,
+            CodebaseAnalysisService codebaseAnalysisService
+    ) {
         this.repositoryService = repositoryService;
+        this.codebaseAnalysisService = codebaseAnalysisService;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -124,6 +134,22 @@ public class RepositoryController {
                 query -> repositoryService.analyzeHealth(
                         requiredParameter(query, "url"),
                         user.accessToken()
+                )
+        );
+    }
+
+    public void getCodebaseAnalysis(
+            HttpExchange exchange,
+            GitHubOAuthService.GitHubUser user
+    ) throws IOException {
+        handleAnalytics(
+                exchange,
+                user,
+                "/api/repository/codebase",
+                query -> codebaseAnalysisService.analyze(
+                        requiredParameter(query, "url"),
+                        user.accessToken(),
+                        parseLargestLimit(query.getOrDefault("limit", "10"))
                 )
         );
     }
@@ -281,6 +307,16 @@ public class RepositoryController {
         return new Pagination(page, limit);
     }
 
+    int parseLargestLimit(String value) {
+        int limit = parseInteger(value, "limit");
+        if (limit < 1 || limit > 30) {
+            throw new IllegalArgumentException(
+                    "Limit must be between 1 and 30."
+            );
+        }
+        return limit;
+    }
+
     private int parseInteger(String value, String name) {
         try {
             return Integer.parseInt(value);
@@ -316,6 +352,7 @@ public class RepositoryController {
         Set<String> allowed = switch (path) {
             case "/api/repository/activity" -> Set.of("url", "period");
             case "/api/repository/commits" -> Set.of("url", "page", "limit");
+            case "/api/repository/codebase" -> Set.of("url", "limit");
             default -> Set.of("url");
         };
         if (!allowed.containsAll(query.keySet())) {
