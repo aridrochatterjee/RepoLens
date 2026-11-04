@@ -76,12 +76,37 @@ public class GitHubApiClient {
             int page,
             int limit
     ) {
-        URI endpoint = URI.create(
+        return getRepositoryCommits(
+                owner, repository, accessToken, page, limit, null, null, null
+        );
+    }
+
+    public JsonNode getRepositoryCommits(
+            String owner,
+            String repository,
+            String accessToken,
+            int page,
+            int limit,
+            String author,
+            String since,
+            String until
+    ) {
+        if ((author == null || author.isBlank())
+                && (since == null || since.isBlank())
+                && (until == null || until.isBlank())) {
+            return getRepositoryCommits(
+                    owner, repository, accessToken, page, limit
+            );
+        }
+        StringBuilder endpoint = new StringBuilder(
                 API_BASE_URL + "/repos/" + owner + "/" + repository
                         + "/commits?per_page=" + limit + "&page=" + page
         );
+        appendQueryParameter(endpoint, "author", author);
+        appendQueryParameter(endpoint, "since", since);
+        appendQueryParameter(endpoint, "until", until);
 
-        return getJson(endpoint, accessToken);
+        return getJson(URI.create(endpoint.toString()), accessToken);
     }
 
     public JsonNode getRepositoryContributors(
@@ -204,6 +229,18 @@ public class GitHubApiClient {
         );
 
         return getJson(endpoint, accessToken);
+    }
+
+    private void appendQueryParameter(
+            StringBuilder query,
+            String name,
+            String value
+    ) {
+        if (value == null || value.isBlank()) return;
+        query.append('&')
+                .append(name)
+                .append('=')
+                .append(URLEncoder.encode(value, StandardCharsets.UTF_8));
     }
 
     public JsonNode getRepositoryFile(

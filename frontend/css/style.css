@@ -439,6 +439,66 @@ body.navigation-locked { overflow: hidden; }
 .activity-count, .activity-week-label { color: var(--subtle); font-size: 9px; white-space: nowrap; }
 .activity-bar-track { display: flex; width: 18px; height: 100%; align-items: end; justify-content: center; border-radius: 6px 6px 2px 2px; background: var(--surface-muted); }
 .activity-bar { width: 100%; border-radius: 6px 6px 2px 2px; background: linear-gradient(0deg, var(--accent-strong), var(--violet)); }
+
+.analytics-controls, .commit-filter-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.analytics-control-label { display: grid; min-width: 150px; flex: 1 1 175px; gap: 5px; color: var(--muted); font-size: 11px; }
+.analytics-control { min-width: 0; min-height: 38px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface-muted); color: var(--text); }
+.commit-filter-controls button { min-height: 38px; }
+.filter-message { min-height: 1.4em; margin: 8px 0 0; color: var(--yellow); font-size: 11px; }
+.activity-summary, .heatmap-title { margin: 0 0 12px; color: var(--muted); font-size: 11px; }
+.heatmap-scroll { max-width: 100%; overflow-x: auto; padding-bottom: 5px; }
+.heatmap-scroll { --heatmap-cell: 12px; --heatmap-gap: 3px; }
+.heatmap-months { display: grid; width: max-content; grid-column: 2; grid-template-columns: repeat(var(--heatmap-weeks), var(--heatmap-cell)); gap: var(--heatmap-gap); margin-bottom: 5px; color: var(--subtle); font-size: 9px; }
+.heatmap-weekdays { display: grid; grid-row: 1 / span 2; grid-template-rows: repeat(7, var(--heatmap-cell)); gap: var(--heatmap-gap); align-items: center; padding-right: 7px; color: var(--subtle); font-size: 8px; }
+.contribution-heatmap { display: grid; width: max-content; grid-column: 2; grid-template-rows: repeat(7, var(--heatmap-cell)); grid-auto-flow: column; grid-auto-columns: var(--heatmap-cell); gap: var(--heatmap-gap); }
+.heatmap-scroll { display: grid; grid-template-columns: max-content max-content; }
+.heatmap-months, .contribution-heatmap { grid-column: 2; }
+.heatmap-cell { width: var(--heatmap-cell); height: var(--heatmap-cell); border: 0; border-radius: 3px; background: var(--surface-raised); }
+.heatmap-cell.heat-0 { background: var(--surface-muted); }
+.heatmap-cell.heat-1 { background: #193d35; }
+.heatmap-cell.heat-2 { background: #216b4f; }
+.heatmap-cell.heat-3 { background: #2da56b; }
+.heatmap-cell.heat-4 { background: #58d68d; }
+[data-theme="light"] .heatmap-cell.heat-1 { background: #d3f0df; }
+[data-theme="light"] .heatmap-cell.heat-2 { background: #9cdbb5; }
+[data-theme="light"] .heatmap-cell.heat-3 { background: #58bb80; }
+[data-theme="light"] .heatmap-cell.heat-4 { background: #16834b; }
+.heatmap-cell.heatmap-outside { background: transparent; }
+.heatmap-legend { display: flex; align-items: center; gap: 4px; margin-top: 9px; color: var(--subtle); font-size: 9px; }
+.heatmap-legend .heatmap-cell { width: 10px; height: 10px; }
+.monthly-activity-chart { display: grid; min-height: 135px; grid-auto-columns: minmax(24px, 1fr); grid-auto-flow: column; align-items: end; gap: 8px; overflow-x: auto; }
+.monthly-activity-item { display: grid; min-width: 25px; height: 130px; grid-template-rows: 18px minmax(45px, 1fr) 20px; justify-items: center; gap: 4px; }
+.monthly-activity-track { display: flex; width: 100%; height: 100%; align-items: end; overflow: hidden; border-radius: 5px 5px 2px 2px; background: var(--surface-muted); }
+.monthly-activity-bar { width: 100%; min-height: 0; border-radius: 5px 5px 2px 2px; background: var(--accent); }
+.weekly-frequency-chart { display: grid; min-height: 130px; grid-auto-columns: minmax(20px, 1fr); grid-auto-flow: column; align-items: end; gap: 5px; overflow-x: auto; }
+.weekly-frequency-item { display: grid; min-width: 20px; height: 126px; grid-template-rows: 16px minmax(40px, 1fr) 18px; justify-items: center; gap: 4px; }
+.weekly-frequency-track { display: flex; width: 100%; height: 100%; align-items: end; overflow: hidden; border-radius: 4px 4px 2px 2px; background: var(--surface-muted); }
+.weekly-frequency-bar { width: 100%; border-radius: 4px 4px 2px 2px; background: var(--violet); }
+.weekday-activity { display: grid; gap: 7px; margin-top: 8px; }
+.weekday-activity-row { display: grid; grid-template-columns: 35px minmax(50px, 1fr) 40px; align-items: center; gap: 8px; color: var(--muted); font-size: 10px; }
+.weekday-activity-row > span:last-child { text-align: right; }
+.weekday-activity-track { height: 7px; overflow: hidden; border-radius: 99px; background: var(--surface-muted); }
+.weekday-activity-fill { display: block; height: 100%; border-radius: inherit; background: var(--violet); }
+.commit-contributor-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px 14px; margin: 0; padding: 0; list-style: none; }
+.commit-contributor-item { display: flex; min-width: 0; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 10px; }
+.commit-contributor-select { overflow: hidden; padding: 0; border: 0; background: transparent; color: var(--accent); text-overflow: ellipsis; cursor: pointer; }
+.commit-history-results { min-width: 0; }
+.repository-treemap { min-width: 0; }
+.treemap-heading h4 { margin: 0; }
+.treemap-heading > p { margin: 5px 0 10px; }
+.treemap-breadcrumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
+.treemap-crumb { padding: 0; border: 0; background: transparent; color: var(--accent); cursor: pointer; }
+.treemap-canvas { position: relative; min-height: 250px; margin-top: 12px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-muted); }
+.treemap-node { position: absolute; display: flex; min-width: 0; min-height: 0; flex-direction: column; align-items: flex-start; justify-content: center; overflow: hidden; padding: 8px; border: 2px solid var(--page); color: var(--text); text-align: left; cursor: pointer; }
+.treemap-row .treemap-node { top: 0; height: 100%; left: var(--tile-start); width: var(--tile-area); }
+.treemap-column .treemap-node { left: 0; width: 100%; top: var(--tile-start); height: var(--tile-area); }
+.treemap-directory { background: color-mix(in srgb, var(--accent-soft) 78%, var(--surface-raised)); }
+.treemap-file { background: var(--surface-raised); }
+.treemap-node:hover, .treemap-node:focus-visible { z-index: 1; filter: brightness(1.2); }
+.treemap-node strong { max-width: 100%; overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.treemap-node > span { color: var(--muted); font-size: 9px; white-space: nowrap; }
+.treemap-missing-sizes { margin: 8px 0 0; color: var(--subtle); font-size: 10px; }
+
 .commit-list, .recent-commit-list { margin: 0; padding: 0; list-style: none; }
 .commit-item, .recent-commit-list li { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
 .commit-item:last-child, .recent-commit-list li:last-child { border-bottom: 0; }

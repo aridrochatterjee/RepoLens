@@ -36,6 +36,7 @@ import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
 
 public class RepositoryService {
 
@@ -312,13 +313,47 @@ public class RepositoryService {
             int page,
             int limit
     ) {
+        return analyzeCommits(
+                repositoryUrl, accessToken, page, limit, null, null, null
+        );
+    }
+
+    public CommitPage analyzeCommits(
+            String repositoryUrl,
+            String accessToken,
+            int page,
+            int limit,
+            String authorLogin,
+            String since,
+            String until
+    ) {
         var parsed = RepositoryUrlParser.parse(repositoryUrl);
+        if (authorLogin != null && !authorLogin.isBlank()
+                && !authorLogin.matches("[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")) {
+            throw new IllegalArgumentException("Invalid GitHub username.");
+        }
+        LocalDate sinceDate = parseCommitDate(since, "since");
+        LocalDate untilDate = parseCommitDate(until, "until");
+        if (sinceDate != null && untilDate != null
+                && sinceDate.isAfter(untilDate)) {
+            throw new IllegalArgumentException(
+                    "The start date must not be after the end date."
+            );
+        }
+        String sinceTimestamp = sinceDate == null
+                ? null : sinceDate.atStartOfDay(ZoneOffset.UTC).toInstant().toString();
+        String untilTimestamp = untilDate == null
+                ? null : untilDate.plusDays(1).atStartOfDay(ZoneOffset.UTC)
+                        .minusNanos(1).toInstant().toString();
         JsonNode response = githubApiClient.getRepositoryCommits(
                 parsed.owner(),
                 parsed.repository(),
                 accessToken,
                 page,
-                limit
+                limit,
+                authorLogin,
+                sinceTimestamp,
+                untilTimestamp
         );
 
         if (response == null || !response.isArray()) {
@@ -367,6 +402,17 @@ public class RepositoryService {
                 limit,
                 commits
         );
+    }
+
+    private LocalDate parseCommitDate(String date, String parameter) {
+        if (date == null || date.isBlank()) return null;
+        try {
+            return LocalDate.parse(date);
+        } catch (DateTimeParseException exception) {
+            throw new IllegalArgumentException(
+                    parameter + " must be an ISO date (YYYY-MM-DD)."
+            );
+        }
     }
 
     public ContributorStats analyzeContributors(

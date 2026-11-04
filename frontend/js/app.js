@@ -58,6 +58,7 @@ const applicationState = {
     fileRequestId: 0,
     fileObjectUrl: null,
     pendingDirectory: null,
+    codebaseTreemapPath: "",
 };
 
 
@@ -628,6 +629,7 @@ function removeRepositoryResult() {
     applicationState.repositoryUrl = null;
     applicationState.workspaceData.clear();
     applicationState.codebaseData = null;
+    applicationState.codebaseTreemapPath = "";
     applicationState.selectedFile = null;
     applicationState.fileRequestId += 1;
     if (applicationState.fileObjectUrl) {
@@ -700,11 +702,21 @@ function showRepositoryResult(repository) {
             statsContainer.append(stat);
         });
     const summary = createElement("div", "overview-summary-grid");
-    [["Repository health", "Loading…", "health"], ["Commits · 30 days", "Loading…", "commits"], ["Open items", repository.open_issues_count == null ? "—" : formatNumber(repository.open_issues_count), "open-items"]]
+    [
+        ["Repository health", "Loading…", "health"],
+        ["Commits · 30 days", "Loading…", "commits"],
+        ["Contributors returned", "Loading…", "contributors"],
+        ["Open PRs · returned page", "Loading…", "open-prs"],
+        ["Open issues · returned page", "Loading…", "open-issues"],
+        ["Languages reported", "Loading…", "languages"],
+    ]
         .forEach(([label, value, key]) => {
             const metric = createElement("article", "overview-metric");
             metric.dataset.metric = key;
             metric.append(createElement("span", "", label), createElement("strong", "", value));
+            if (key === "contributors" || key === "open-prs" || key === "open-issues") {
+                metric.title = "Bounded GitHub results; the value may be partial.";
+            }
             if (key === "health") {
                 const link = createElement("a", "text-link", "View breakdown");
                 link.href = "#insights";
@@ -737,6 +749,7 @@ function showRepositoryResult(repository) {
     explore.setAttribute("aria-label", "Explore more repository workspaces");
     [
         ["Repository insights", "insights"],
+        ["Commit analytics", "commit-analytics"],
         ["Code explorer", "code-explorer"],
         ["Contributors", "contributors"],
         ["Pull requests", "pull-requests"],
@@ -777,6 +790,7 @@ function showRepositoryResult(repository) {
 
 const WORKSPACE_COPY = {
     insights: ["Repository insights", "Health, activity and commit history from GitHub."],
+    "commit-analytics": ["Commit analytics", "Explore real repository activity, contribution timing and filtered commit history."],
     "code-explorer": ["Code explorer", "Browse tracked files and open source in RepoLens."],
     "code-composition": ["Code composition", "Explore languages, file types and tracked code size."],
     "directory-analysis": ["Directory analysis", "Compare directory footprint and review structural observations."],
@@ -940,7 +954,489 @@ function loadCodebaseWorkspace(body, mode) {
     });
 }
 
+function loadCommitAnalyticsWorkspace() {
+    const controls = createWorkspacePanel(
+        "workspace-commit-controls",
+        "Activity scope",
+        "Repository activity comes from GitHub statistics; contributor activity is based on a bounded commit sample."
+    );
+    const activityContributor = createElement("select", "analytics-control");
+    activityContributor.setAttribute("aria-label", "Heatmap contributor");
+    activityContributor.append(new Option("All contributors", ""));
+    const period = createElement("select", "analytics-control");
+    period.setAttribute("aria-label", "Activity period");
+    [
+        ["30", "Last 30 days"],
+        ["90", "Last 90 days"],
+        ["364", "Last 12 months (52 weeks)"],
+    ].forEach(([value, label]) => period.append(new Option(label, value)));
+    period.value = "364";
+    const controlRow = createElement("div", "analytics-controls");
+    const contributorLabel = createElement("label", "analytics-control-label", "Contribution heatmap");
+    contributorLabel.append(activityContributor);
+    const periodLabel = createElement("label", "analytics-control-label", "Date range");
+    periodLabel.append(period);
+    controlRow.append(contributorLabel, periodLabel);
+    controls.append(controlRow);
+
+    const heatmap = createWorkspacePanel(
+        "workspace-contribution-heatmap",
+        "Contribution heatmap",
+        "Each square is a UTC date. Hover or focus a square for its commit count."
+    );
+    const patterns = createWorkspacePanel(
+        "workspace-commit-patterns",
+        "Commit frequency",
+        "Weekly, monthly, and weekday counts use the selected activity data; frequency is not a measure of quality or productivity."
+    );
+    const contributors = createWorkspacePanel(
+        "workspace-top-contributors",
+        "Most active contributors",
+        "GitHub contribution counts for returned contributors; this is not a performance ranking."
+    );
+    const history = createWorkspacePanel(
+        "workspace-filtered-commits",
+        "Commit history",
+        "Filter GitHub's commit list by author and date. Results are paginated."
+    );
+
+    const historyFilters = createElement("div", "commit-filter-controls");
+    const historyAuthor = createElement("select", "analytics-control");
+    historyAuthor.setAttribute("aria-label", "Filter commit history by contributor");
+    historyAuthor.append(new Option("All contributors", ""));
+    const since = createElement("input", "analytics-control");
+    since.type = "date";
+    since.setAttribute("aria-label", "Commit start date");
+    const until = createElement("input", "analytics-control");
+    until.type = "date";
+    until.setAttribute("aria-label", "Commit end date");
+    const applyFilters = createElement("button", "button-secondary", "Apply filters");
+    applyFilters.type = "button";
+    const historyMessage = createElement("p", "filter-message");
+    const historyAuthorLabel = createElement("label", "analytics-control-label", "Contributor");
+    historyAuthorLabel.append(historyAuthor);
+    const sinceLabel = createElement("label", "analytics-control-label", "Since");
+    sinceLabel.append(since);
+    const untilLabel = createElement("label", "analytics-control-label", "Until");
+    untilLabel.append(until);
+    historyFilters.append(
+        historyAuthorLabel,
+        sinceLabel,
+        untilLabel,
+        applyFilters
+    );
+    history.append(historyFilters, historyMessage);
+
+    let historyBody = createElement("div", "commit-history-results");
+    history.append(historyBody);
+    let activityRequest = 0;
+    let commitFilters = {};
+
+    const loadHistory = (pageNumber = 1) => {
+        const requestId = analysisRequestId;
+        const params = {
+            ...commitFilters,
+            page: String(pageNumber),
+            limit: "30",
+        };
+        loadCommitPage(
+            historyBody,
+            applicationState.repositoryUrl,
+            pageNumber,
+            requestId,
+            params
+        );
+    };
+
+    const applyHistoryFilters = () => {
+        historyMessage.textContent = "";
+        if (since.value && until.value && since.value > until.value) {
+            historyMessage.textContent = "The start date must be on or before the end date.";
+            return;
+        }
+        commitFilters = {};
+        if (historyAuthor.value) commitFilters.author = historyAuthor.value;
+        if (since.value) commitFilters.since = since.value;
+        if (until.value) commitFilters.until = until.value;
+        loadHistory();
+    };
+
+    const loadActivity = () => {
+        const periodDays = Number(period.value);
+        const username = activityContributor.value;
+        const requestId = analysisRequestId;
+        const currentRequest = ++activityRequest;
+        const firstDate = new Date();
+        firstDate.setUTCHours(0, 0, 0, 0);
+        firstDate.setUTCDate(firstDate.getUTCDate() - periodDays + 1);
+        const sinceDate = firstDate.toISOString().slice(0, 10);
+        const untilDate = new Date().toISOString().slice(0, 10);
+
+        heatmap.setAttribute("aria-busy", "true");
+        patterns.setAttribute("aria-busy", "true");
+        heatmap.replaceChildren(createElement("p", "insight-loading", "Loading contribution activity…"));
+        patterns.replaceChildren(createElement("p", "insight-loading", "Loading commit frequency…"));
+
+        const endpoint = username
+            ? CONFIG.endpoints.commits
+            : CONFIG.endpoints.activity;
+        const parameters = username
+            ? {
+                author: username,
+                since: sinceDate,
+                until: untilDate,
+                page: "1",
+                limit: "100",
+            }
+            : { period: String(periodDays) };
+        void requestInsight(endpoint, applicationState.repositoryUrl, requestId, parameters)
+            .then((data) => {
+                if (!data || requestId !== analysisRequestId
+                        || currentRequest !== activityRequest) return;
+                if (username) {
+                    renderContributorCommitHeatmap(
+                        heatmap,
+                        data,
+                        username,
+                        periodDays,
+                        sinceDate,
+                        untilDate
+                    );
+                    setInsightMessage(
+                        patterns,
+                        "Select “All contributors” to view repository-wide monthly and weekday patterns."
+                    );
+                } else {
+                    renderCommitHeatmap(heatmap, data);
+                    renderCommitPatterns(patterns, data);
+                }
+            })
+            .catch((error) => {
+                if (requestId !== analysisRequestId
+                        || currentRequest !== activityRequest) return;
+                setInsightMessage(
+                    heatmap,
+                    error.message || "Unable to load contribution activity.",
+                    "error"
+                );
+                setInsightMessage(
+                    patterns,
+                    "Commit frequency is unavailable.",
+                    "error"
+                );
+            });
+    };
+
+    activityContributor.addEventListener("change", loadActivity);
+    period.addEventListener("change", loadActivity);
+    applyFilters.addEventListener("click", applyHistoryFilters);
+    since.addEventListener("change", applyHistoryFilters);
+    until.addEventListener("change", applyHistoryFilters);
+    historyAuthor.addEventListener("change", applyHistoryFilters);
+    loadHistory();
+    loadActivity();
+
+    void loadWorkspaceData(
+        "contributors",
+        CONFIG.endpoints.contributors,
+        contributors,
+        (target, data) => renderCommitContributorSummary(
+            target,
+            data,
+            activityContributor,
+            historyAuthor,
+            loadActivity
+        )
+    );
+}
+
+function renderCommitContributorSummary(
+    container,
+    data,
+    activitySelect,
+    historySelect,
+    refreshHeatmap
+) {
+    container.replaceChildren();
+    container.setAttribute("aria-busy", "false");
+    if (data.available === false) {
+        setInsightMessage(
+            container,
+            data.limitation || "Contributor data is unavailable."
+        );
+        return;
+    }
+    const contributors = Array.isArray(data.contributors)
+        ? data.contributors.filter((item) => item.login)
+        : [];
+    if (contributors.length === 0) {
+        setInsightMessage(container, "GitHub returned no named contributors.");
+        return;
+    }
+    const list = createElement("ol", "commit-contributor-list");
+    contributors.slice(0, 8).forEach((contributor) => {
+        const row = createElement("li", "commit-contributor-item");
+        const select = createElement(
+            "button",
+            "commit-contributor-select",
+            `@${contributor.login}`
+        );
+        select.type = "button";
+        select.addEventListener("click", () => {
+            activitySelect.value = contributor.login;
+            historySelect.value = contributor.login;
+            refreshHeatmap();
+            historySelect.dispatchEvent(new Event("change"));
+        });
+        row.append(
+            select,
+            createElement("span", "", `${formatNumber(contributor.contributions)} commits`)
+        );
+        list.append(row);
+    });
+    container.append(list);
+    for (const [select, selected] of [
+        [activitySelect, activitySelect.value],
+        [historySelect, historySelect.value],
+    ]) {
+        contributors.forEach((contributor) => {
+            select.append(new Option(
+                contributor.login,
+                contributor.login,
+                false,
+                contributor.login === selected
+            ));
+        });
+    }
+    if (data.mayBeTruncated) {
+        container.append(createElement(
+            "p",
+            "insight-limitation",
+            "GitHub contributor results are capped; this list and its ranking may be partial."
+        ));
+    }
+}
+
+function renderCommitHeatmap(container, activity) {
+    if (!activity.available) {
+        setInsightMessage(
+            container,
+            activity.unavailableReason || "GitHub has no complete activity data for this period."
+        );
+        return;
+    }
+    renderCalendarHeatmap(
+        container,
+        activity.dailyActivity,
+        `Repository activity · last ${activity.periodDays} days`,
+        false
+    );
+}
+
+function renderContributorCommitHeatmap(
+    container,
+    commitPage,
+    username,
+    periodDays,
+    since,
+    until
+) {
+    const counts = new Map();
+    (commitPage.commits || []).forEach((commit) => {
+        const day = commit.date?.slice(0, 10);
+        if (day && day >= since && day <= until) {
+            counts.set(day, (counts.get(day) || 0) + 1);
+        }
+    });
+    const first = new Date(`${since}T00:00:00Z`);
+    const dailyActivity = [];
+    for (let offset = 0; offset < periodDays; offset++) {
+        const date = new Date(first);
+        date.setUTCDate(first.getUTCDate() + offset);
+        const key = date.toISOString().slice(0, 10);
+        dailyActivity.push({ date: key, commits: counts.get(key) || 0 });
+    }
+    renderCalendarHeatmap(
+        container,
+        dailyActivity,
+        `@${username} · commits returned in the last ${periodDays} days`,
+        (commitPage.commits || []).length >= 100
+    );
+}
+
+function renderCalendarHeatmap(container, activity, label, partial) {
+    const values = Array.isArray(activity) ? activity : [];
+    if (values.length === 0) {
+        setInsightMessage(container, "No contribution dates are available.");
+        return;
+    }
+    container.replaceChildren();
+    container.setAttribute("aria-busy", "false");
+    container.append(createElement("p", "heatmap-title", label));
+    const counts = new Map(values.map((item) => [item.date, Number(item.commits) || 0]));
+    const dates = values.map((item) => new Date(`${item.date}T00:00:00Z`));
+    const first = new Date(dates[0]);
+    first.setUTCDate(first.getUTCDate() - first.getUTCDay());
+    const last = new Date(dates.at(-1));
+    last.setUTCDate(last.getUTCDate() + (6 - last.getUTCDay()));
+    const weeks = Math.ceil((last - first) / (7 * 86400000)) + 1;
+    const max = Math.max(0, ...counts.values());
+    const wrapper = createElement("div", "heatmap-scroll");
+    const monthLabels = createElement("div", "heatmap-months");
+    const grid = createElement("div", "contribution-heatmap");
+    wrapper.style.setProperty("--heatmap-weeks", weeks);
+    grid.style.setProperty("--heatmap-weeks", weeks);
+    const weekdayLabels = createElement("div", "heatmap-weekdays");
+    ["", "Mon", "", "Wed", "", "Fri", ""].forEach((day) => {
+        weekdayLabels.append(createElement("span", "", day));
+    });
+    let lastMonth = -1;
+    for (let week = 0; week < weeks; week++) {
+        const weekStart = new Date(first);
+        weekStart.setUTCDate(first.getUTCDate() + week * 7);
+        const month = weekStart.getUTCMonth();
+        monthLabels.append(createElement(
+            "span",
+            "",
+            month !== lastMonth ? weekStart.toLocaleString("en", {
+                month: "short",
+                timeZone: "UTC",
+            }) : ""
+        ));
+        lastMonth = month;
+        for (let day = 0; day < 7; day++) {
+            const date = new Date(weekStart);
+            date.setUTCDate(weekStart.getUTCDate() + day);
+            const key = date.toISOString().slice(0, 10);
+            const count = counts.get(key);
+            const cell = createElement("span", "heatmap-cell");
+            if (count === undefined) {
+                cell.classList.add("heatmap-outside");
+                cell.setAttribute("aria-hidden", "true");
+            } else {
+                const intensity = count === 0 || max === 0
+                    ? 0
+                    : Math.min(4, Math.ceil(count / max * 4));
+                cell.classList.add(`heat-${intensity}`);
+                cell.title = `${formatNumber(count)} ${count === 1 ? "commit" : "commits"} on ${key}`;
+                cell.setAttribute("role", "img");
+                cell.setAttribute("aria-label", cell.title);
+                cell.tabIndex = 0;
+            }
+            grid.append(cell);
+        }
+    }
+    wrapper.append(weekdayLabels, monthLabels, grid);
+    container.append(wrapper);
+    const legend = createElement("div", "heatmap-legend");
+    legend.append(createElement("span", "", "Less"));
+    for (let intensity = 0; intensity <= 4; intensity++) {
+        const swatch = createElement("span", `heatmap-cell heat-${intensity}`);
+        swatch.setAttribute("aria-hidden", "true");
+        legend.append(swatch);
+    }
+    legend.append(createElement("span", "", "More"));
+    container.append(legend);
+    if (partial) {
+        container.append(createElement(
+            "p",
+            "insight-limitation",
+            "This contributor view uses at most the 100 latest matching commits returned by GitHub; older activity may be omitted."
+        ));
+    }
+}
+
+function renderCommitPatterns(container, activity) {
+    if (!activity.available) {
+        setInsightMessage(
+            container,
+            activity.unavailableReason || "Commit frequency is unavailable."
+        );
+        return;
+    }
+    container.replaceChildren();
+    container.setAttribute("aria-busy", "false");
+    const days = activity.dailyActivity || [];
+    const monthTotals = new Map();
+    const weekdayTotals = new Array(7).fill(0);
+    days.forEach((item) => {
+        const date = new Date(`${item.date}T00:00:00Z`);
+        const count = Number(item.commits) || 0;
+        const month = item.date.slice(0, 7);
+        monthTotals.set(month, (monthTotals.get(month) || 0) + count);
+        weekdayTotals[(date.getUTCDay() + 6) % 7] += count;
+    });
+    const monthly = createElement("div", "monthly-activity-chart");
+    const maxMonth = Math.max(1, ...monthTotals.values());
+    for (const [month, count] of monthTotals) {
+        const item = createElement("div", "monthly-activity-item");
+        const bar = createElement("span", "monthly-activity-bar");
+        const track = createElement("span", "monthly-activity-track");
+        bar.style.height = `${count / maxMonth * 100}%`;
+        bar.title = `${formatNumber(count)} commits in ${month}`;
+        track.append(bar);
+        item.append(
+            createElement("span", "activity-count", formatNumber(count)),
+            track,
+            createElement("span", "activity-week-label", month)
+        );
+        monthly.append(item);
+    }
+    container.append(createElement("h4", "", "Monthly commits"));
+    container.append(monthly);
+    const weeklyValues = Array.isArray(activity.weeklyActivity)
+        ? activity.weeklyActivity
+        : [];
+    if (weeklyValues.length > 0) {
+        const weekly = createElement("div", "weekly-frequency-chart");
+        const maxWeek = Math.max(1, ...weeklyValues.map((item) => Number(item.commits) || 0));
+        weeklyValues.forEach((week) => {
+            const count = Number(week.commits) || 0;
+            const item = createElement("div", "weekly-frequency-item");
+            const track = createElement("span", "weekly-frequency-track");
+            const fill = createElement("span", "weekly-frequency-bar");
+            fill.style.height = `${count / maxWeek * 100}%`;
+            fill.title = `${formatNumber(count)} commits in week starting ${week.weekStarting}`;
+            track.append(fill);
+            item.append(
+                createElement("span", "activity-count", formatNumber(count)),
+                track,
+                createElement("span", "activity-week-label", week.weekStarting?.slice(5) || "")
+            );
+            weekly.append(item);
+        });
+        container.append(createElement("h4", "", "Weekly commits"), weekly);
+    }
+    const weekdays = createElement("div", "weekday-activity");
+    const maxDay = Math.max(1, ...weekdayTotals);
+    ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].forEach((name, index) => {
+        const row = createElement("div", "weekday-activity-row");
+        const track = createElement("span", "weekday-activity-track");
+        const fill = createElement("span", "weekday-activity-fill");
+        fill.style.width = `${weekdayTotals[index] / maxDay * 100}%`;
+        track.append(fill);
+        row.append(
+            createElement("span", "", name),
+            track,
+            createElement("span", "", formatNumber(weekdayTotals[index]))
+        );
+        weekdays.append(row);
+    });
+    container.append(createElement("h4", "", "Commits by weekday (UTC)"), weekdays);
+    const total = days.reduce((sum, item) => sum + (Number(item.commits) || 0), 0);
+    container.prepend(createElement(
+        "p",
+        "activity-summary",
+        `${formatNumber(total)} commits in the complete ${activity.periodDays}-day GitHub statistics window.`
+    ));
+}
+
 function loadWorkspaceContent(workspace) {
+    if (workspace === "commit-analytics") {
+        loadCommitAnalyticsWorkspace();
+        return;
+    }
+
     if (workspace === "insights") {
         const health = createWorkspacePanel(
             "workspace-health-panel",
@@ -1127,6 +1623,10 @@ async function loadOverviewResource(endpoint, repositoryUrl, requestId, paramete
 async function loadOverview(repositoryUrl, requestId, panels) {
     const healthMetric = elements.repositoryDashboard.querySelector('[data-metric="health"] strong');
     const commitMetric = elements.repositoryDashboard.querySelector('[data-metric="commits"] strong');
+    const contributorMetric = elements.repositoryDashboard.querySelector('[data-metric="contributors"] strong');
+    const pullRequestMetric = elements.repositoryDashboard.querySelector('[data-metric="open-prs"] strong');
+    const issueMetric = elements.repositoryDashboard.querySelector('[data-metric="open-issues"] strong');
+    const languageMetric = elements.repositoryDashboard.querySelector('[data-metric="languages"] strong');
     const resources = [
         loadOverviewResource(CONFIG.endpoints.health, repositoryUrl, requestId)
             .then((data) => {
@@ -1151,9 +1651,52 @@ async function loadOverview(repositoryUrl, requestId, panels) {
         loadOverviewResource(CONFIG.endpoints.languages, repositoryUrl, requestId)
             .then((data) => {
                 if (!data || requestId !== analysisRequestId) return;
+                if (languageMetric) {
+                    languageMetric.textContent = Array.isArray(data.languages)
+                        ? formatNumber(data.languages.length)
+                        : "—";
+                }
                 renderOverviewLanguages(panels.language, data);
             })
             .catch((error) => showOverviewError(panels.language, error, requestId)),
+        loadOverviewResource(
+            CONFIG.endpoints.contributors,
+            repositoryUrl,
+            requestId
+        ).then((data) => {
+            if (!data || requestId !== analysisRequestId) return;
+            applicationState.workspaceData.set("contributors", data);
+            if (contributorMetric) {
+                contributorMetric.textContent = data.available === false
+                    || data.totalReturned == null
+                    ? "—"
+                    : formatNumber(data.totalReturned);
+            }
+        }).catch((error) => showOverviewMetricError(contributorMetric, error, requestId)),
+        loadOverviewResource(
+            CONFIG.endpoints.pullRequests,
+            repositoryUrl,
+            requestId,
+            { period: "30", page: "1", limit: "100" }
+        ).then((data) => {
+            if (!data || requestId !== analysisRequestId) return;
+            applicationState.workspaceData.set("pull-requests", data);
+            if (pullRequestMetric) {
+                pullRequestMetric.textContent = formatNumber(data.openPullRequests);
+            }
+        }).catch((error) => showOverviewMetricError(pullRequestMetric, error, requestId)),
+        loadOverviewResource(
+            CONFIG.endpoints.issues,
+            repositoryUrl,
+            requestId,
+            { period: "30", page: "1", limit: "100" }
+        ).then((data) => {
+            if (!data || requestId !== analysisRequestId) return;
+            applicationState.workspaceData.set("issues", data);
+            if (issueMetric) {
+                issueMetric.textContent = formatNumber(data.openIssues);
+            }
+        }).catch((error) => showOverviewMetricError(issueMetric, error, requestId)),
         loadOverviewResource(
             CONFIG.endpoints.commits,
             repositoryUrl,
@@ -1492,7 +2035,7 @@ function renderActivity(container, activity) {
     container.append(chart);
 }
 
-function renderCommits(container, data, repositoryUrl, requestId) {
+function renderCommits(container, data, repositoryUrl, requestId, filters = {}) {
     container.replaceChildren();
     container.setAttribute("aria-busy", "false");
     const commits = Array.isArray(data.commits) ? data.commits : [];
@@ -1537,13 +2080,13 @@ function renderCommits(container, data, repositoryUrl, requestId) {
     previous.type = "button";
     previous.disabled = page <= 1;
     previous.addEventListener("click", () => {
-        loadCommitPage(container, repositoryUrl, page - 1, requestId);
+        loadCommitPage(container, repositoryUrl, page - 1, requestId, filters);
     });
     const next = createElement("button", "", "Next");
     next.type = "button";
     next.disabled = commits.length < (Number(data.limit) || 10);
     next.addEventListener("click", () => {
-        loadCommitPage(container, repositoryUrl, page + 1, requestId);
+        loadCommitPage(container, repositoryUrl, page + 1, requestId, filters);
     });
     pagination.append(
         previous,
@@ -2208,6 +2751,32 @@ function renderCodebase(container, data, mode = "all") {
     }
     directoryPanel.append(directoryChart);
     container.append(directoryPanel);
+    const entries = Array.isArray(data.treeEntries) ? data.treeEntries : [];
+
+    if (mode === "directory-analysis") {
+        const treemap = createElement("section", "codebase-subsection repository-treemap");
+        treemap.dataset.workspaceSection = "directory-analysis";
+        const treemapHeading = createElement("div", "treemap-heading");
+        const treemapTitle = createElement("h4", "", "Repository size treemap");
+        const treemapNote = createElement(
+            "p",
+            "codebase-note",
+            "Area represents GitHub-reported blob bytes. Missing sizes are excluded, not estimated."
+        );
+        const breadcrumb = createElement("nav", "treemap-breadcrumbs");
+        breadcrumb.setAttribute("aria-label", "Treemap directory path");
+        treemapHeading.append(treemapTitle, treemapNote, breadcrumb);
+        const treemapCanvas = createElement("div", "treemap-canvas");
+        const missingSizes = createElement("p", "treemap-missing-sizes");
+        treemap.append(treemapHeading, treemapCanvas, missingSizes);
+        container.append(treemap);
+        renderRepositoryTreemap(
+            treemap,
+            entries,
+            Array.isArray(data.directories) ? data.directories : [],
+            data.treeTruncated || data.explorerTruncated
+        );
+    }
 
     const explorer = createElement("section", "codebase-subsection");
     explorer.id = "codebase-explorer";
@@ -2220,7 +2789,6 @@ function renderCodebase(container, data, mode = "all") {
             "Select a folder to inspect its immediate contents. Empty directories are not stored in Git and cannot be shown."
         )
     );
-    const entries = Array.isArray(data.treeEntries) ? data.treeEntries : [];
     const selectLabel = createElement("label", "codebase-select-label", "Current folder");
     const select = createElement("select", "codebase-directory-select");
     select.id = "codebase-directory-select";
@@ -2410,6 +2978,118 @@ function renderCodebase(container, data, mode = "all") {
             const section = child.dataset.workspaceSection;
             if (section && section !== "all" && section !== mode) child.remove();
         });
+    }
+}
+
+function renderRepositoryTreemap(container, entries, directories, partial = false) {
+    const breadcrumb = container.querySelector(".treemap-breadcrumbs");
+    const canvas = container.querySelector(".treemap-canvas");
+    const missingSizes = container.querySelector(".treemap-missing-sizes");
+    if (!breadcrumb || !canvas || !missingSizes) return;
+
+    const directorySizes = new Map(
+        directories.map((directory) => [directory.path, Number(directory.knownSizeBytes)])
+    );
+    const currentPath = applicationState.codebaseTreemapPath;
+    const segments = currentPath ? currentPath.split("/") : [];
+    breadcrumb.replaceChildren();
+    const root = createElement("button", "treemap-crumb", "Repository");
+    root.type = "button";
+    root.addEventListener("click", () => {
+        applicationState.codebaseTreemapPath = "";
+        renderRepositoryTreemap(container, entries, directories, partial);
+    });
+    breadcrumb.append(root);
+    let accumulated = "";
+    segments.forEach((segment, index) => {
+        breadcrumb.append(createElement("span", "breadcrumb-separator", "/"));
+        accumulated = accumulated ? `${accumulated}/${segment}` : segment;
+        const path = accumulated;
+        if (index === segments.length - 1) {
+            breadcrumb.append(createElement("strong", "", segment));
+        } else {
+            const crumb = createElement("button", "treemap-crumb", segment);
+            crumb.type = "button";
+            crumb.addEventListener("click", () => {
+                applicationState.codebaseTreemapPath = path;
+                renderRepositoryTreemap(container, entries, directories, partial);
+            });
+            breadcrumb.append(crumb);
+        }
+    });
+
+    const prefix = currentPath ? `${currentPath}/` : "";
+    const children = entries.filter((entry) => {
+        if (currentPath && !entry.path.startsWith(prefix)) return false;
+        const remainder = currentPath ? entry.path.slice(prefix.length) : entry.path;
+        return remainder.length > 0 && !remainder.includes("/");
+    }).map((entry) => {
+        const sizeBytes = entry.type === "directory"
+            ? directorySizes.get(entry.path)
+            : entry.sizeBytes;
+        return { ...entry, treemapSize: Number.isFinite(Number(sizeBytes)) ? Number(sizeBytes) : null };
+    });
+    const sized = children.filter((entry) => entry.treemapSize !== null && entry.treemapSize > 0);
+    const excluded = children.length - sized.length;
+    canvas.replaceChildren();
+    missingSizes.textContent = excluded > 0
+        ? `${formatNumber(excluded)} direct entr${excluded === 1 ? "y has" : "ies have"} missing or zero-byte sizes and are not represented by area.`
+        : "";
+    if (sized.length === 0) {
+        setInsightMessage(
+            canvas,
+            children.length === 0
+                ? "No tracked files or directories are available here."
+                : "GitHub did not report positive file sizes for this directory."
+        );
+        if (partial) {
+            missingSizes.textContent += " The tree response is partial or capped.";
+        }
+        return;
+    }
+
+    sized.sort((left, right) =>
+        right.treemapSize - left.treemapSize
+        || String(left.path).localeCompare(String(right.path))
+    );
+    const total = sized.reduce((sum, entry) => sum + entry.treemapSize, 0);
+    const direction = segments.length % 2 === 0 ? "row" : "column";
+    canvas.classList.toggle("treemap-column", direction === "column");
+    canvas.classList.toggle("treemap-row", direction === "row");
+    let position = 0;
+    const totalArea = 100;
+    sized.forEach((entry) => {
+        const isDirectory = entry.type === "directory";
+        const node = createElement(
+            "button",
+            `treemap-node ${isDirectory ? "treemap-directory" : "treemap-file"}`
+        );
+        node.type = "button";
+        const area = entry.treemapSize / total * totalArea;
+        node.style.setProperty("--tile-start", `${position}%`);
+        node.style.setProperty("--tile-area", `${area}%`);
+        position += area;
+        node.title = `${entry.path} · ${formatBytes(entry.treemapSize)}`;
+        node.setAttribute(
+            "aria-label",
+            `${isDirectory ? "Open directory" : "Open file"} ${entry.path}, ${formatBytes(entry.treemapSize)}`
+        );
+        node.append(
+            createElement("strong", "", entry.name),
+            createElement("span", "", formatBytes(entry.treemapSize))
+        );
+        if (isDirectory) {
+            node.addEventListener("click", () => {
+                applicationState.codebaseTreemapPath = entry.path;
+                renderRepositoryTreemap(container, entries, directories, partial);
+            });
+        } else {
+            node.addEventListener("click", () => openFileViewer(entry));
+        }
+        canvas.append(node);
+    });
+    if (partial) {
+        missingSizes.textContent += " Treemap coverage follows the bounded GitHub tree response.";
     }
 }
 
@@ -2741,7 +3421,7 @@ async function loadInsight(panel, endpoint, repositoryUrl, requestId, render, pa
     }
 }
 
-async function loadCommitPage(panel, repositoryUrl, page, requestId) {
+async function loadCommitPage(panel, repositoryUrl, page, requestId, filters = {}) {
     panel.setAttribute("aria-busy", "true");
     panel.replaceChildren(createElement("div", "insight-loading", "Loading recent commits..."));
     await loadInsight(
@@ -2749,8 +3429,14 @@ async function loadCommitPage(panel, repositoryUrl, page, requestId) {
         CONFIG.endpoints.commits,
         repositoryUrl,
         requestId,
-        (target, data) => renderCommits(target, data, repositoryUrl, requestId),
-        { page: String(page), limit: "10" }
+        (target, data) => renderCommits(
+            target,
+            data,
+            repositoryUrl,
+            requestId,
+            filters
+        ),
+        { page: String(page), limit: "30", ...filters }
     );
 }
 
@@ -2975,6 +3661,7 @@ async function analyzeRepository(repositoryUrl, requestId) {
     applicationState.repositoryUrl = repositoryUrl;
     applicationState.workspaceData.clear();
     applicationState.codebaseData = null;
+    applicationState.codebaseTreemapPath = "";
     showRepositoryResult(data);
     navigateWorkspace("dashboard", false);
 }

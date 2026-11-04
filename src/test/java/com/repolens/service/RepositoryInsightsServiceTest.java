@@ -55,6 +55,22 @@ class RepositoryInsightsServiceTest {
     }
 
     @Test
+    void aggregatesFiftyTwoWeeksOfCompleteActivityForContributionHeatmaps() {
+        github.activity = activityResponse(364, 1);
+
+        var activity = service.analyzeActivity(
+                REPOSITORY_URL,
+                "test-token",
+                364
+        );
+
+        assertTrue(activity.available());
+        assertEquals(364, activity.dailyActivity().size());
+        assertEquals(364, activity.totalCommits());
+        assertTrue(activity.weeklyActivity().size() >= 52);
+    }
+
+    @Test
     void reportsTiedMostActiveDaysWithoutChoosingArbitrarily() {
         github.activity = activityResponse(7, 1);
 
@@ -160,6 +176,54 @@ class RepositoryInsightsServiceTest {
                         + "0123456789abcdef0123456789abcdef01234567",
                 commits.commits().get(0).htmlUrl()
         );
+    }
+
+    @Test
+    void appliesValidatedAuthorAndInclusiveDateFiltersToCommitRequests() {
+        service.analyzeCommits(
+                REPOSITORY_URL,
+                "test-token",
+                2,
+                30,
+                "octocat",
+                "2026-03-01",
+                "2026-03-07"
+        );
+
+        assertEquals("octocat", github.commitAuthor);
+        assertEquals("2026-03-01T00:00:00Z", github.commitSince);
+        assertEquals("2026-03-07T23:59:59.999999999Z", github.commitUntil);
+        assertEquals(2, github.commitPage);
+        assertEquals(30, github.commitLimit);
+    }
+
+    @Test
+    void rejectsInvalidCommitFiltersBeforeCallingGitHub() {
+        org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> service.analyzeCommits(
+                        REPOSITORY_URL,
+                        "test-token",
+                        1,
+                        30,
+                        "bad/name",
+                        null,
+                        null
+                )
+        );
+        org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> service.analyzeCommits(
+                        REPOSITORY_URL,
+                        "test-token",
+                        1,
+                        30,
+                        null,
+                        "2026-03-08",
+                        "2026-03-07"
+                )
+        );
+        assertEquals(0, github.commitRequests);
     }
 
     @Test
@@ -272,6 +336,12 @@ class RepositoryInsightsServiceTest {
         private JsonNode contributors;
         private GitHubApiException activityFailure;
         private GitHubApiException contributorsFailure;
+        private int commitRequests;
+        private int commitPage;
+        private int commitLimit;
+        private String commitAuthor;
+        private String commitSince;
+        private String commitUntil;
 
         @Override
         public JsonNode getRepository(String owner, String name, String token) {
@@ -296,6 +366,27 @@ class RepositoryInsightsServiceTest {
                 int page,
                 int limit
         ) {
+            commitRequests++;
+            return commits;
+        }
+
+        @Override
+        public JsonNode getRepositoryCommits(
+                String owner,
+                String name,
+                String token,
+                int page,
+                int limit,
+                String author,
+                String since,
+                String until
+        ) {
+            commitRequests++;
+            commitPage = page;
+            commitLimit = limit;
+            commitAuthor = author;
+            commitSince = since;
+            commitUntil = until;
             return commits;
         }
 
