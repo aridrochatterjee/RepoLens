@@ -2,25 +2,29 @@
 
 RepoLens is a Java 21 and vanilla JavaScript application for exploring GitHub repository metadata, source structure, and development activity. It uses the JDK `HttpServer` and `HttpClient`, Jackson, Gradle, and GitHub REST API; no web framework or frontend framework is required.
 
-## RepoLens 2.0 frontend
+## RepoLens 2.2 frontend — Dark Observatory
 
-The frontend is a dark-first, GitHub-inspired workspace for repository insights, code intelligence, and developer intelligence. The redesign retains the static HTML/CSS/vanilla JavaScript architecture and existing API contracts.
+The frontend is a dark-first Developer Observatory for repository insights, code intelligence, and developer intelligence. It retains the static HTML/CSS/vanilla JavaScript architecture and existing API contracts.
 
-- **Design system:** `frontend/css/style.css` defines shared color, typography, spacing, border, surface, elevation, transition, and layout tokens. Components use the same tokens in dark and light themes.
+- **Design system:** Observatory surface, typography, status, chart, focus, spacing, and motion tokens live in `frontend/css/style.css`; dark mode is the signature experience and light mode remains supported.
+- **Tailwind build:** `tailwind.config.js` defines the Observatory palette and typography extensions. `frontend/css/tailwind.css` is compiled to the committed `frontend/css/tailwind.generated.css`, which is loaded before the component stylesheet. Tailwind is a build-time frontend dependency only—there is no Node server or frontend framework.
 - **Frontend structure:** `frontend/index.html` contains the signed-out product landing page and authenticated workspace shell. `frontend/js/app.js` handles authentication state, repository analysis, safe DOM rendering, and navigation.
 - **Navigation:** The signed-in shell has independent Dashboard, Repository Insights, Commit Analytics, Code Explorer, Code Composition, Directory Analysis, Contributors, Pull Requests, Issues, Collaboration, and Settings workspaces. Analytics load when a workspace is opened instead of being displayed together.
 - **Dashboard:** A concise repository header, health/activity/contributor/PR/issue/language summary metrics, recent commits, activity trend, and language distribution. Bounded GitHub counts are identified as returned-page samples; detailed analytics live in their own workspaces.
 - **Source viewer:** Files open inside RepoLens with path metadata, safe text rendering, line numbers, lightweight syntax highlighting, copy/download actions, and a secondary GitHub link. Binary files are identified and are not returned as text.
 - **Theme:** The theme toggle switches between dark and light CSS custom-property sets. The preference is stored locally as a presentation setting; authentication tokens are never stored in browser storage.
 - **Responsive and accessible behavior:** The sidebar becomes a keyboard-operable mobile drawer, workspaces and code panels reflow for narrow screens, focus indicators remain visible, charts expose text descriptions, and motion is reduced when requested by the operating system.
-- **Dependencies:** No frontend packages, build system, or framework were added. The existing server continues to serve the static files at their existing paths.
+- **Dependencies:** Tailwind CSS, PostCSS, and Autoprefixer are development-only CSS build dependencies. The existing Java server continues to serve static files at their existing paths.
 
 Run the frontend syntax check and backend tests with:
 
 ```sh
+npm run build:css
 node --check frontend/js/app.js
 ./gradlew clean test
 ```
+
+During frontend work, `npm run watch:css` continuously rebuilds the production stylesheet. Before committing, use `npm run build:css`; it minifies the generated CSS used by the application.
 
 ## Features
 

@@ -658,6 +658,12 @@ function showRepositoryResult(repository) {
     resultSection.id = "repository-result";
     resultSection.setAttribute("aria-labelledby", "repository-result-heading");
 
+    const observatoryLabel = createElement(
+        "p",
+        "observatory-kicker",
+        "Observatory overview · live repository field"
+    );
+
     const heading = createElement("div", "repository-heading");
     const headingTitle = createElement(
         "h2",
@@ -688,7 +694,14 @@ function showRepositoryResult(repository) {
             typeof repository.private === "boolean"
                 ? repository.private ? "Private repository" : "Public repository"
                 : "Visibility unavailable"),
-        createElement("span", "", repository.language || "Language unavailable")
+        createElement("span", "", repository.language || "Language unavailable"),
+        createElement(
+            "span",
+            "",
+            repository.default_branch
+                ? `Branch · ${repository.default_branch}`
+                : "Branch unavailable"
+        )
     );
 
     const statsContainer = createElement("div", "repository-stats");
@@ -764,6 +777,7 @@ function showRepositoryResult(repository) {
         explore.append(link);
     });
     resultSection.append(
+        observatoryLabel,
         heading,
         description,
         metadata,

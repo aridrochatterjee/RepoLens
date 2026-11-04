@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --tw-observatory-ring: #7777ff;
+  }
+}
+
+@layer components {
+  .observatory-kicker {
+    @apply font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-indigo-300;
+  }
+
+  .observatory-surface {
+    @apply border border-observatory-border bg-observatory-surface;
+  }
+}
