@@ -10,6 +10,7 @@ import com.repolens.controller.RepositoryController;
 import com.repolens.server.WebServer;
 import com.repolens.service.RepositoryService;
 import com.repolens.service.CodebaseAnalysisService;
+import com.repolens.service.DeveloperIntelligenceService;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -47,10 +48,17 @@ public class Main {
                         repositoryService
                 );
 
+        DeveloperIntelligenceService developerIntelligenceService =
+                new DeveloperIntelligenceService(
+                        githubApiClient,
+                        repositoryService
+                );
+
         RepositoryController repositoryController =
                 new RepositoryController(
                         repositoryService,
-                        codebaseAnalysisService
+                        codebaseAnalysisService,
+                        developerIntelligenceService
                 );
 
         WebServer server =

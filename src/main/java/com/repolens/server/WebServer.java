@@ -135,6 +135,38 @@ public class WebServer {
             );
 
             server.createContext(
+                    "/api/repository/contributors/",
+                    exchange -> authenticatedRepositoryInsight(
+                            exchange,
+                            repositoryController::getContributorProfile
+                    )
+            );
+
+            server.createContext(
+                    "/api/repository/pull-requests",
+                    exchange -> authenticatedRepositoryInsight(
+                            exchange,
+                            repositoryController::getPullRequestAnalytics
+                    )
+            );
+
+            server.createContext(
+                    "/api/repository/issues",
+                    exchange -> authenticatedRepositoryInsight(
+                            exchange,
+                            repositoryController::getIssueAnalytics
+                    )
+            );
+
+            server.createContext(
+                    "/api/repository/collaboration",
+                    exchange -> authenticatedRepositoryInsight(
+                            exchange,
+                            repositoryController::getCollaborationInsights
+                    )
+            );
+
+            server.createContext(
                     "/api/repository",
                     this::authenticatedRepository
             );

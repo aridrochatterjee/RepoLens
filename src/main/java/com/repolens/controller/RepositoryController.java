@@ -7,6 +7,7 @@ import com.repolens.client.GitHubApiException;
 import com.repolens.model.Repository;
 import com.repolens.service.RepositoryService;
 import com.repolens.service.CodebaseAnalysisService;
+import com.repolens.service.DeveloperIntelligenceService;
 import com.sun.net.httpserver.HttpExchange;
 
 import java.io.IOException;
@@ -21,18 +22,28 @@ public class RepositoryController {
 
     private final RepositoryService repositoryService;
     private final CodebaseAnalysisService codebaseAnalysisService;
+    private final DeveloperIntelligenceService developerIntelligenceService;
     private final ObjectMapper objectMapper;
 
     public RepositoryController(RepositoryService repositoryService) {
-        this(repositoryService, null);
+        this(repositoryService, null, null);
     }
 
     public RepositoryController(
             RepositoryService repositoryService,
             CodebaseAnalysisService codebaseAnalysisService
     ) {
+        this(repositoryService, codebaseAnalysisService, null);
+    }
+
+    public RepositoryController(
+            RepositoryService repositoryService,
+            CodebaseAnalysisService codebaseAnalysisService,
+            DeveloperIntelligenceService developerIntelligenceService
+    ) {
         this.repositoryService = repositoryService;
         this.codebaseAnalysisService = codebaseAnalysisService;
+        this.developerIntelligenceService = developerIntelligenceService;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -205,6 +216,81 @@ public class RepositoryController {
         );
     }
 
+    public void getContributorProfile(
+            HttpExchange exchange,
+            GitHubOAuthService.GitHubUser user
+    ) throws IOException {
+        String path = exchange.getRequestURI().getPath();
+        String prefix = "/api/repository/contributors/";
+        if (!path.startsWith(prefix) || path.substring(prefix.length()).contains("/")) {
+            sendError(exchange, 404, "Endpoint not found.");
+            return;
+        }
+        String username = path.substring(prefix.length());
+        handleAnalytics(
+                exchange,
+                user,
+                path,
+                query -> developerIntelligenceService.analyzeContributor(
+                        requiredParameter(query, "url"),
+                        username,
+                        user.accessToken(),
+                        parseLargestLimit(query.getOrDefault("limit", "10"))
+                )
+        );
+    }
+
+    public void getPullRequestAnalytics(
+            HttpExchange exchange,
+            GitHubOAuthService.GitHubUser user
+    ) throws IOException {
+        handleAnalytics(
+                exchange,
+                user,
+                "/api/repository/pull-requests",
+                query -> developerIntelligenceService.analyzePullRequests(
+                        requiredParameter(query, "url"),
+                        user.accessToken(),
+                        parsePeriod(query.getOrDefault("period", "30")),
+                        parseAnalyticsPage(query.getOrDefault("page", "1")),
+                        parseAnalyticsLimit(query.getOrDefault("limit", "100"))
+                )
+        );
+    }
+
+    public void getIssueAnalytics(
+            HttpExchange exchange,
+            GitHubOAuthService.GitHubUser user
+    ) throws IOException {
+        handleAnalytics(
+                exchange,
+                user,
+                "/api/repository/issues",
+                query -> developerIntelligenceService.analyzeIssues(
+                        requiredParameter(query, "url"),
+                        user.accessToken(),
+                        parsePeriod(query.getOrDefault("period", "30")),
+                        parseAnalyticsPage(query.getOrDefault("page", "1")),
+                        parseAnalyticsLimit(query.getOrDefault("limit", "100"))
+                )
+        );
+    }
+
+    public void getCollaborationInsights(
+            HttpExchange exchange,
+            GitHubOAuthService.GitHubUser user
+    ) throws IOException {
+        handleAnalytics(
+                exchange,
+                user,
+                "/api/repository/collaboration",
+                query -> developerIntelligenceService.analyzeCollaboration(
+                        requiredParameter(query, "url"),
+                        user.accessToken()
+                )
+        );
+    }
+
     private void handleAnalytics(
             HttpExchange exchange,
             GitHubOAuthService.GitHubUser user,
@@ -317,6 +403,26 @@ public class RepositoryController {
         return limit;
     }
 
+    int parseAnalyticsPage(String value) {
+        int page = parseInteger(value, "page");
+        if (page < 1 || page > 10) {
+            throw new IllegalArgumentException(
+                    "Page must be between 1 and 10."
+            );
+        }
+        return page;
+    }
+
+    int parseAnalyticsLimit(String value) {
+        int limit = parseInteger(value, "limit");
+        if (limit < 1 || limit > 100) {
+            throw new IllegalArgumentException(
+                    "Limit must be between 1 and 100."
+            );
+        }
+        return limit;
+    }
+
     private int parseInteger(String value, String name) {
         try {
             return Integer.parseInt(value);
@@ -349,12 +455,22 @@ public class RepositoryController {
             String path,
             Map<String, String> query
     ) {
-        Set<String> allowed = switch (path) {
-            case "/api/repository/activity" -> Set.of("url", "period");
-            case "/api/repository/commits" -> Set.of("url", "page", "limit");
-            case "/api/repository/codebase" -> Set.of("url", "limit");
-            default -> Set.of("url");
-        };
+        Set<String> allowed;
+        if (path.startsWith("/api/repository/contributors/")) {
+            allowed = Set.of("url", "limit");
+        } else {
+            allowed = switch (path) {
+                case "/api/repository/activity" -> Set.of("url", "period");
+                case "/api/repository/commits" -> Set.of("url", "page", "limit");
+                case "/api/repository/codebase" -> Set.of("url", "limit");
+                case "/api/repository/pull-requests",
+                     "/api/repository/issues" -> Set.of(
+                             "url", "period", "page", "limit"
+                     );
+                case "/api/repository/collaboration" -> Set.of("url");
+                default -> Set.of("url");
+            };
+        }
         if (!allowed.containsAll(query.keySet())) {
             throw new IllegalArgumentException(
                     "Unsupported query parameter."

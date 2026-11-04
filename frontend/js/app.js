@@ -33,6 +33,7 @@ const elements = {
 };
 
 let analysisRequestId = 0;
+let contributorProfileRequestId = 0;
 
 
 /* 02. Configuration
@@ -49,7 +50,10 @@ const CONFIG = {
         health: "/api/repository/health",
         activity: "/api/repository/activity",
         commits: "/api/repository/commits",
-        contributors: "/api/repository/contributors",
+        contributorProfile: "/api/repository/contributors",
+        pullRequests: "/api/repository/pull-requests",
+        issues: "/api/repository/issues",
+        collaboration: "/api/repository/collaboration",
         codebase: "/api/repository/codebase",
     },
 
@@ -836,71 +840,603 @@ function renderCommits(container, data, repositoryUrl, requestId) {
     container.append(pagination);
 }
 
-function renderContributors(container, data) {
+function renderDeveloperContributors(
+    container,
+    data,
+    repositoryUrl,
+    requestId,
+    profileContainer
+) {
     container.replaceChildren();
     container.setAttribute("aria-busy", "false");
+    if (data.available === false) {
+        setInsightMessage(
+            container,
+            data.limitation || "Contributor collaboration data is unavailable."
+        );
+        return;
+    }
     const contributors = Array.isArray(data.contributors)
         ? data.contributors
         : [];
     if (contributors.length === 0) {
         setInsightMessage(
             container,
-            data.available === false
-                ? data.limitation || "Contributor statistics are unavailable."
-                : "No contributors were returned for this repository."
+            data.limitation || "No contributor data is available."
         );
         return;
     }
 
+    const metrics = createElement("div", "developer-metrics");
+    [
+        [formatNumber(data.totalContributionsReturned), "returned contributions"],
+        [formatNumber(data.contributorsReturned), "contributors returned"],
+        [data.topContributorShare == null ? "—" : `${data.topContributorShare}%`, "top contributor share"],
+        [data.topFiveContributorShare == null ? "—" : `${data.topFiveContributorShare}%`, "top five share"],
+    ].forEach(([value, label]) => {
+        const metric = createElement("div", "developer-metric");
+        metric.append(
+            createElement("strong", "", value),
+            createElement("span", "", label)
+        );
+        metrics.append(metric);
+    });
+    container.append(metrics);
+    if (Array.isArray(data.observations) && data.observations.length > 0) {
+        const observations = createElement("ul", "collaboration-observations");
+        data.observations.forEach((observation) => {
+            const item = createElement("li", "collaboration-observation");
+            item.append(
+                createElement("strong", "", observation.title),
+                createElement("span", "", observation.evidence)
+            );
+            observations.append(item);
+        });
+        container.append(observations);
+    }
+
+    const note = createElement(
+        "p",
+        "developer-note",
+        `Ranks use GitHub's returned contribution counts. Shares are of the returned subset, not an estimate of effort. ${data.limitation || ""}`
+    );
+    container.append(note);
+    const list = createElement("ol", "developer-contributor-list");
+    const showCount = { value: 20 };
+    const renderRows = () => {
+        list.replaceChildren();
+        contributors.slice(0, showCount.value).forEach((contributor, index) => {
+            const row = createElement("li", "developer-contributor");
+            const avatar = createElement("span", "contributor-avatar-fallback");
+            const avatarUrl = safeAvatarUrl(contributor.avatarUrl);
+            if (avatarUrl) {
+                const image = createElement("img");
+                image.src = avatarUrl;
+                image.alt = "";
+                image.loading = "lazy";
+                image.addEventListener("error", () => image.remove());
+                avatar.append(image);
+            }
+            const details = createElement("div", "developer-contributor-details");
+            const login = contributor.login || "Deleted or unavailable account";
+            const select = createElement(
+                "button",
+                "developer-profile-button",
+                login
+            );
+            select.type = "button";
+            select.disabled = !contributor.login;
+            select.addEventListener("click", () => {
+                if (!contributor.login) return;
+                loadContributorProfile(
+                    profileContainer,
+                    repositoryUrl,
+                    contributor.login,
+                    requestId
+                );
+            });
+            details.append(select);
+            if (contributor.bot) {
+                details.append(createElement("span", "bot-badge", "Bot"));
+            }
+            const count = Number(contributor.contributions) || 0;
+            details.append(createElement(
+                "span",
+                "developer-contributor-meta",
+                `${formatNumber(count)} contributions`
+            ));
+            const profileUrl = safeGitHubUrl(contributor.profileUrl);
+            if (profileUrl) {
+                const external = createElement("a", "developer-external-link", "GitHub ↗");
+                external.href = profileUrl;
+                external.target = "_blank";
+                external.rel = "noopener noreferrer";
+                external.setAttribute("aria-label", `Open ${login} on GitHub in a new tab`);
+                details.append(external);
+            }
+            const rank = createElement("span", "developer-rank", `#${index + 1}`);
+            row.append(rank, avatar, details);
+            const share = contributor.contributionShare == null
+                ? null
+                : Number(contributor.contributionShare);
+            const shareNode = createElement(
+                "span",
+                "developer-contribution-share",
+                share != null && Number.isFinite(share)
+                    ? `${share.toFixed(1)}%` : "—"
+            );
+            shareNode.setAttribute(
+                "aria-label",
+                share != null && Number.isFinite(share)
+                    ? `${share.toFixed(1)} percent of returned contributions`
+                    : "Contribution share unavailable"
+            );
+            row.append(shareNode);
+            list.append(row);
+        });
+    };
+    renderRows();
+    container.append(list);
+    if (contributors.length > showCount.value) {
+        const more = createElement(
+            "button",
+            "developer-more",
+            "Show more contributors"
+        );
+        more.type = "button";
+        more.addEventListener("click", () => {
+            showCount.value = Math.min(
+                contributors.length,
+                showCount.value + 20
+            );
+            renderRows();
+            if (showCount.value >= contributors.length) more.remove();
+        });
+        container.append(more);
+    }
+}
+
+function loadContributorProfile(container, repositoryUrl, username, requestId) {
+    const profileRequestId = ++contributorProfileRequestId;
+    container.replaceChildren(
+        createElement("p", "insight-loading", `Loading ${username}'s public repository activity...`)
+    );
+    container.setAttribute("aria-busy", "true");
+    void requestInsight(
+        `${CONFIG.endpoints.contributorProfile}/${encodeURIComponent(username)}`,
+        repositoryUrl,
+        requestId,
+        { limit: "30" }
+    ).then((profile) => {
+        if (!profile || profileRequestId !== contributorProfileRequestId
+                || requestId !== analysisRequestId) return;
+        renderContributorProfile(container, profile);
+    }).catch((error) => {
+        if (profileRequestId !== contributorProfileRequestId
+                || requestId !== analysisRequestId) return;
+        setInsightMessage(
+            container,
+            error.message || "Unable to load contributor activity.",
+            "error"
+        );
+    });
+}
+
+function renderContributorProfile(container, profile) {
+    container.replaceChildren();
+    container.setAttribute("aria-busy", "false");
+    const header = createElement("div", "developer-profile-header");
+    const avatar = createElement("span", "contributor-avatar-fallback profile-avatar");
+    const avatarUrl = safeAvatarUrl(profile.avatarUrl);
+    if (avatarUrl) {
+        const image = createElement("img");
+        image.src = avatarUrl;
+        image.alt = "";
+        image.addEventListener("error", () => image.remove());
+        avatar.append(image);
+    }
+    const heading = createElement("div", "developer-profile-heading");
+    heading.append(
+        createElement("h4", "", profile.displayName || profile.username || "Contributor"),
+        createElement("span", "", `@${profile.username || "unavailable"}${profile.bot ? " · Bot account" : ""}`)
+    );
+    const linkUrl = safeGitHubUrl(profile.profileUrl);
+    if (linkUrl) {
+        const link = createElement("a", "developer-external-link", "View profile ↗");
+        link.href = linkUrl;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        heading.append(link);
+    }
+    header.append(avatar, heading);
+    container.append(header);
+
+    const metrics = createElement("div", "developer-metrics profile-metrics");
+    [
+        [profile.contributions == null ? "—" : formatNumber(profile.contributions), "repository contributions"],
+        [profile.authoredPullRequests == null ? "—" : formatNumber(profile.authoredPullRequests), "authored pull requests"],
+        [profile.authoredIssues == null ? "—" : formatNumber(profile.authoredIssues), "authored issues"],
+        [profile.reviewedPullRequests == null ? "—" : formatNumber(profile.reviewedPullRequests), "PRs reviewed (search)"],
+    ].forEach(([value, label]) => {
+        const metric = createElement("div", "developer-metric");
+        metric.append(createElement("strong", "", value), createElement("span", "", label));
+        metrics.append(metric);
+    });
+    container.append(metrics);
     container.append(createElement(
         "p",
-        "contributor-summary",
-        `${formatNumber(data.totalReturned)} contributors returned by GitHub`
+        "developer-note",
+        `First and most recent observed commits: ${profile.firstObservedContribution ? formatTimestamp(profile.firstObservedContribution) : "unavailable"} / ${profile.mostRecentObservedContribution ? formatTimestamp(profile.mostRecentObservedContribution) : "unavailable"}. These dates and charts cover the latest matching commits returned by GitHub, not full history.`
     ));
-    const list = createElement("ol", "contributor-list");
-    contributors.forEach((contributor) => {
-        const item = createElement("li", "contributor-item");
-        const avatarUrl = safeAvatarUrl(contributor.avatarUrl);
-        const avatar = createElement("span", "contributor-avatar-fallback");
-        if (avatarUrl) {
-            const image = createElement("img");
-            image.src = avatarUrl;
-            image.alt = "";
-            image.loading = "lazy";
-            image.addEventListener("error", () => image.remove());
-            avatar.append(image);
-        }
 
-        const name = contributor.login || "Deleted or unavailable account";
-        const profileUrl = safeGitHubUrl(contributor.profileUrl);
-        const nameNode = profileUrl
-            ? createElement("a", "contributor-name", name)
-            : createElement("span", "contributor-name", name);
-        if (profileUrl) {
-            nameNode.href = profileUrl;
-            nameNode.target = "_blank";
-            nameNode.rel = "noopener noreferrer";
-        }
-        const info = createElement("div", "contributor-info");
-        const count = Number(contributor.contributions) || 0;
-        info.append(
-            nameNode,
-            createElement("span", "", `${formatNumber(count)} contributions`)
+    const activityTitle = createElement("h5", "developer-subheading", "Commits by day · last 30 days (returned sample)");
+    container.append(activityTitle);
+    container.append(renderDeveloperActivity(profile.commitActivity, "commits"));
+    const commits = Array.isArray(profile.recentCommits) ? profile.recentCommits : [];
+    const commitList = createElement("ul", "developer-activity-list");
+    commits.slice(0, 10).forEach((commit) => {
+        const item = createElement("li", "");
+        const linkUrl = safeGitHubUrl(commit.htmlUrl);
+        const title = createElement(
+            linkUrl ? "a" : "span",
+            "developer-activity-link",
+            commit.message || "Commit message unavailable"
         );
-        const distribution = createElement("div", "contributor-distribution");
-        distribution.setAttribute("aria-label", `${contributor.contributionShare || 0}% of returned contributions`);
-        const fill = createElement("span", "");
-        fill.style.width = `${Math.max(0, Math.min(100, Number(contributor.contributionShare) || 0))}%`;
-        distribution.append(fill);
-        item.append(avatar, info, distribution);
+        if (linkUrl) {
+            title.href = linkUrl;
+            title.target = "_blank";
+            title.rel = "noopener noreferrer";
+        }
+        item.append(title, createElement("span", "developer-activity-date", formatTimestamp(commit.date)));
+        commitList.append(item);
+    });
+    if (commits.length === 0) {
+        commitList.append(createElement("li", "insight-message", "No matching commits were returned."));
+    }
+    container.append(createElement("h5", "developer-subheading", "Recent commits"));
+    container.append(commitList);
+    container.append(createElement("p", "developer-note", profile.limitation || ""));
+}
+
+function renderPullRequestAnalytics(container, data, repositoryUrl, requestId) {
+    container.replaceChildren();
+    container.setAttribute("aria-busy", "false");
+    const metrics = createElement("div", "developer-metrics");
+    [
+        [formatNumber(data.totalReturned), "PRs returned"],
+        [formatNumber(data.openPullRequests), "open"],
+        [formatNumber(data.closedPullRequests), "closed (includes merged)"],
+        [formatNumber(data.mergedPullRequests), "merged"],
+        [data.mergeRate == null ? "—" : `${Number(data.mergeRate).toFixed(1)}%`, "merged / returned closed"],
+        [data.averageTimeToMergeHours == null ? "—" : `${Number(data.averageTimeToMergeHours).toFixed(1)} h`, "average time to merge"],
+    ].forEach(([value, label]) => {
+        const metric = createElement("div", "developer-metric");
+        metric.append(createElement("strong", "", value), createElement("span", "", label));
+        metrics.append(metric);
+    });
+    container.append(metrics);
+    container.append(createElement("p", "developer-note", `${data.scope || ""} ${data.limitation || ""}`));
+    container.append(createElement("h5", "developer-subheading", `PRs opened · last ${data.periodDays} days`));
+    container.append(renderDeveloperActivity(data.activity, "opened"));
+    const authorList = createElement("div", "developer-author-list");
+    (data.authorDistribution || []).slice(0, 5).forEach((author) => {
+        authorList.append(createElement(
+            "span",
+            "developer-author-chip",
+            `${author.username}: ${author.count} (${Number(author.percentage).toFixed(1)}%)`
+        ));
+    });
+    if (authorList.childElementCount) {
+        container.append(createElement("h5", "developer-subheading", "Authorship among returned PRs"));
+        container.append(authorList);
+    }
+    container.append(createElement(
+        "p",
+        "developer-note",
+        `${formatNumber(data.draftPullRequests)} drafts; ${formatNumber(data.reviewComments)} review comments; ${data.uniqueReviewersObserved == null ? "Reviewer identity unavailable" : `${formatNumber(data.uniqueReviewersObserved)} unique reviewers observed`} in recent PR review lists.`
+    ));
+    appendPullRequestList(container, "Recently merged", data.recentlyMerged);
+    appendPullRequestList(container, "Recently opened", data.recentlyOpened);
+    appendDeveloperPagination(
+        container,
+        CONFIG.endpoints.pullRequests,
+        data,
+        repositoryUrl,
+        requestId,
+        renderPullRequestAnalytics
+    );
+}
+
+function appendPullRequestList(container, heading, entries) {
+    container.append(createElement("h5", "developer-subheading", heading));
+    const list = createElement("ul", "developer-activity-list");
+    (entries || []).slice(0, 5).forEach((entry) => {
+        const item = createElement("li", "");
+        const url = safeGitHubUrl(entry.htmlUrl);
+        const title = createElement(
+            url ? "a" : "span",
+            "developer-activity-link",
+            `#${entry.number} ${entry.title}${entry.draft ? " · Draft" : ""}`
+        );
+        if (url) {
+            title.href = url;
+            title.target = "_blank";
+            title.rel = "noopener noreferrer";
+        }
+        item.append(
+            title,
+            createElement("span", "developer-activity-date", entry.author || "Author unavailable")
+        );
         list.append(item);
     });
+    if (!entries || entries.length === 0) {
+        list.append(createElement("li", "insight-message", "No pull requests in this returned sample."));
+    }
     container.append(list);
-    container.append(createElement(
-        "p",
-        "insight-limitation",
-        data.limitation || "GitHub contributor data may be incomplete."
-    ));
+}
+
+function renderIssueAnalytics(container, data, repositoryUrl, requestId) {
+    container.replaceChildren();
+    container.setAttribute("aria-busy", "false");
+    const metrics = createElement("div", "developer-metrics");
+    [
+        [formatNumber(data.totalReturned), "issues returned"],
+        [formatNumber(data.openIssues), "open"],
+        [formatNumber(data.closedIssues), "closed"],
+        [data.averageResolutionHours == null ? "—" : `${Number(data.averageResolutionHours).toFixed(1)} h`, "average resolution"],
+    ].forEach(([value, label]) => {
+        const metric = createElement("div", "developer-metric");
+        metric.append(createElement("strong", "", value), createElement("span", "", label));
+        metrics.append(metric);
+    });
+    container.append(metrics);
+    container.append(createElement("p", "developer-note", `${data.scope || ""} ${data.limitation || ""}`));
+    container.append(createElement("h5", "developer-subheading", `Opened / closed · last ${data.periodDays} days`));
+    container.append(renderDeveloperActivity(data.activity, "issues"));
+    const labels = createElement("div", "developer-author-list");
+    (data.labels || []).slice(0, 10).forEach((label) => {
+        labels.append(createElement("span", "developer-author-chip", `${label.name} · ${label.count}`));
+    });
+    if (labels.childElementCount) {
+        container.append(createElement("h5", "developer-subheading", "Labels in returned issues"));
+        container.append(labels);
+    }
+    const authors = createElement("div", "developer-author-list");
+    (data.authorDistribution || []).slice(0, 5).forEach((author) => {
+        authors.append(createElement(
+            "span",
+            "developer-author-chip",
+            `${author.username}: ${author.issueCount} (${Number(author.percentage).toFixed(1)}%)`
+        ));
+    });
+    if (authors.childElementCount) {
+        container.append(createElement("h5", "developer-subheading", "Issue authorship in returned sample"));
+        container.append(authors);
+    }
+    appendIssueList(container, "Recently opened", data.recentlyOpened);
+    appendIssueList(container, "Recently closed", data.recentlyClosed);
+    appendIssueList(container, "Recently active", data.recentlyActive);
+    appendDeveloperPagination(
+        container,
+        CONFIG.endpoints.issues,
+        data,
+        repositoryUrl,
+        requestId,
+        renderIssueAnalytics
+    );
+}
+
+function appendDeveloperPagination(
+    container,
+    endpoint,
+    data,
+    repositoryUrl,
+    requestId,
+    renderer
+) {
+    const pagination = createElement("div", "developer-pagination");
+    const page = Number(data.page) || 1;
+    const previous = createElement("button", "", "Previous sample");
+    previous.type = "button";
+    previous.disabled = page <= 1;
+    previous.addEventListener("click", () => {
+        container.replaceChildren(createElement("div", "insight-loading", "Loading previous page..."));
+        void loadInsight(
+            container,
+            endpoint,
+            repositoryUrl,
+            requestId,
+            (target, result) => renderer(target, result, repositoryUrl, requestId),
+            {
+                period: String(data.periodDays),
+                page: String(page - 1),
+                limit: String(data.limit)
+            }
+        );
+    });
+    const next = createElement("button", "", "Next sample");
+    next.type = "button";
+    next.disabled = !data.hasNextPage;
+    next.addEventListener("click", () => {
+        container.replaceChildren(createElement("div", "insight-loading", "Loading next page..."));
+        void loadInsight(
+            container,
+            endpoint,
+            repositoryUrl,
+            requestId,
+            (target, result) => renderer(target, result, repositoryUrl, requestId),
+            {
+                period: String(data.periodDays),
+                page: String(page + 1),
+                limit: String(data.limit)
+            }
+        );
+    });
+    pagination.append(
+        previous,
+        createElement("span", "", `Page ${page} · up to ${data.limit} records`),
+        next
+    );
+    container.append(pagination);
+}
+
+function appendIssueList(container, heading, entries) {
+    container.append(createElement("h5", "developer-subheading", heading));
+    const list = createElement("ul", "developer-activity-list");
+    (entries || []).slice(0, 5).forEach((entry) => {
+        const item = createElement("li", "");
+        const url = safeGitHubUrl(entry.htmlUrl);
+        const title = createElement(
+            url ? "a" : "span",
+            "developer-activity-link",
+            `#${entry.number} ${entry.title}`
+        );
+        if (url) {
+            title.href = url;
+            title.target = "_blank";
+            title.rel = "noopener noreferrer";
+        }
+        item.append(title, createElement("span", "developer-activity-date", entry.author || "Author unavailable"));
+        list.append(item);
+    });
+    if (!entries || entries.length === 0) {
+        list.append(createElement("li", "insight-message", "No issues in this returned sample."));
+    }
+    container.append(list);
+}
+
+function renderDeveloperActivity(points, label) {
+    const wrapper = createElement("div", "developer-chart-wrap");
+    const chart = createElement("div", "developer-activity-chart");
+    chart.setAttribute("role", "img");
+    const values = Array.isArray(points) ? points : [];
+    const maximum = Math.max(
+        1,
+        ...values.map((point) =>
+            (Number(point.opened) || 0) + (Number(point.closed) || 0)
+        )
+    );
+    const chartDescription = values.map((point) => {
+        const opened = Number(point.commits ?? point.opened) || 0;
+        const closed = Number(point.closed) || 0;
+        return `${point.date}: ${opened} ${label}${closed ? `, ${closed} closed` : ""}`;
+    }).join("; ");
+    chart.setAttribute(
+        "aria-label",
+        `${label} activity by day${chartDescription ? `: ${chartDescription}` : " unavailable"}.`
+    );
+    values.forEach((point) => {
+        const opened = Number(point.commits ?? point.opened) || 0;
+        const closed = Number(point.closed) || 0;
+        const total = opened + closed;
+        const bar = createElement("span", "developer-activity-bar");
+        bar.title = `${point.date}: ${opened} ${label}${closed ? `, ${closed} closed` : ""}`;
+        bar.style.height = `${total === 0 ? 0 : Math.max(4, total / maximum * 100)}%`;
+        const openFill = createElement("span", "developer-bar-opened");
+        const closedFill = createElement("span", "developer-bar-closed");
+        const denominator = Math.max(1, total);
+        openFill.style.height = `${opened / denominator * 100}%`;
+        closedFill.style.height = `${closed / denominator * 100}%`;
+        bar.append(openFill, closedFill);
+        chart.append(bar);
+    });
+    if (values.length === 0) {
+        chart.append(createElement("span", "insight-message", "Activity unavailable."));
+    }
+    wrapper.append(chart);
+    if (values.length > 1) {
+        const range = createElement("div", "developer-chart-range");
+        range.append(
+            createElement("span", "", values[0].date),
+            createElement("span", "", values.at(-1).date)
+        );
+        wrapper.append(range);
+    }
+    return wrapper;
+}
+
+function createDeveloperSkeleton() {
+    const skeleton = createElement("div", "developer-skeleton");
+    skeleton.setAttribute("aria-hidden", "true");
+    for (let index = 0; index < 3; index++) {
+        skeleton.append(createElement("span", ""));
+    }
+    return skeleton;
+}
+
+function loadDeveloperIntelligence(container, repositoryUrl, requestId) {
+    container.replaceChildren();
+    container.setAttribute("aria-busy", "false");
+    const grid = createElement("div", "developer-intelligence-grid");
+    const leaderboard = createElement("section", "developer-card developer-leaderboard-card");
+    const pullRequests = createElement("section", "developer-card");
+    const issues = createElement("section", "developer-card");
+    const profileContainer = createElement("section", "developer-profile-card");
+    const leaderboardBody = createElement("div", "developer-card-body");
+    const pullRequestBody = createElement("div", "developer-card-body");
+    const issueBody = createElement("div", "developer-card-body");
+    profileContainer.setAttribute("aria-live", "polite");
+    leaderboard.append(
+        createElement("h4", "", "Contributor leaderboard"),
+        leaderboardBody
+    );
+    pullRequests.append(
+        createElement("h4", "", "Pull request analytics"),
+        pullRequestBody
+    );
+    issues.append(
+        createElement("h4", "", "Issue analytics"),
+        issueBody
+    );
+    [leaderboardBody, pullRequestBody, issueBody].forEach((body) => {
+        body.setAttribute("aria-busy", "true");
+        body.append(createDeveloperSkeleton());
+    });
+    grid.append(leaderboard, pullRequests, issues);
+    container.append(grid, profileContainer);
+    setInsightMessage(
+        profileContainer,
+        "Select a contributor to inspect their public repository activity."
+    );
+    void loadInsight(
+        leaderboardBody,
+        CONFIG.endpoints.collaboration,
+        repositoryUrl,
+        requestId,
+        (target, data) => renderDeveloperContributors(
+            target,
+            data,
+            repositoryUrl,
+            requestId,
+            profileContainer
+        )
+    );
+    void loadInsight(
+        pullRequestBody,
+        CONFIG.endpoints.pullRequests,
+        repositoryUrl,
+        requestId,
+        (target, data) => renderPullRequestAnalytics(
+            target,
+            data,
+            repositoryUrl,
+            requestId
+        ),
+        { period: "30", page: "1", limit: "100" }
+    );
+    void loadInsight(
+        issueBody,
+        CONFIG.endpoints.issues,
+        repositoryUrl,
+        requestId,
+        (target, data) => renderIssueAnalytics(
+            target,
+            data,
+            repositoryUrl,
+            requestId
+        ),
+        { period: "30", page: "1", limit: "100" }
+    );
 }
 
 function renderCodebase(container, data) {
@@ -1309,10 +1845,10 @@ function loadRepositoryInsights(resultSection, repositoryUrl, requestId) {
         "Recent commits",
         "Latest changes from the default repository history"
     );
-    const contributors = createInsightPanel(
-        "contributors-panel",
-        "Contributors",
-        "Contribution activity returned by GitHub"
+    const developers = createInsightPanel(
+        "developer-intelligence-panel",
+        "Developer intelligence",
+        "Contributor activity, pull requests, issues, and evidence-based collaboration signals"
     );
     const codebase = createInsightPanel(
         "codebase-panel",
@@ -1322,10 +1858,10 @@ function loadRepositoryInsights(resultSection, repositoryUrl, requestId) {
     insights.append(
         header,
         codebase.panel,
+        developers.panel,
         health.panel,
         activity.panel,
-        commits.panel,
-        contributors.panel
+        commits.panel
     );
     resultSection.append(insights);
 
@@ -1337,6 +1873,7 @@ function loadRepositoryInsights(resultSection, repositoryUrl, requestId) {
         renderCodebase,
         { limit: "10" }
     );
+    loadDeveloperIntelligence(developers.body, repositoryUrl, requestId);
     void loadInsight(
         health.body,
         CONFIG.endpoints.health,
@@ -1350,13 +1887,6 @@ function loadRepositoryInsights(resultSection, repositoryUrl, requestId) {
         repositoryUrl,
         requestId,
         renderActivity
-    );
-    void loadInsight(
-        contributors.body,
-        CONFIG.endpoints.contributors,
-        repositoryUrl,
-        requestId,
-        renderContributors
     );
     void loadCommitPage(commits.body, repositoryUrl, 1, requestId);
 }
