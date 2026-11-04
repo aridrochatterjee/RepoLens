@@ -1,0 +1,340 @@
+
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    name="description"
+    content="RepoLens helps developers understand GitHub repositories through code composition, repository metrics and development insights."
+  />
+  <meta name="theme-color" content="#0c0b10" />
+
+  <title>RepoLens — Repository intelligence</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  />
+
+  <link rel="stylesheet" href="/css/style.css" />
+  <script src="/js/app.js" defer></script>
+</head>
+
+<body>
+  <div class="app">
+
+    <!-- Global navigation -->
+    <header class="navbar">
+      <a href="/" class="brand" aria-label="RepoLens home">
+        <span class="brand-icon" aria-hidden="true">R</span>
+        <span class="brand-name">
+          RepoLens<span class="brand-period">.</span>
+        </span>
+      </a>
+
+      <nav class="nav-actions" aria-label="Account and appearance">
+        <div class="auth-actions">
+          <div id="user-profile" class="user-profile" hidden>
+            <img
+              id="user-avatar"
+              src=""
+              alt="GitHub profile avatar"
+            />
+            <span id="user-name"></span>
+            <button
+              type="button"
+              id="logout-button"
+              class="logout-button"
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          id="theme-toggle"
+          class="theme-toggle"
+          aria-label="Switch to light theme"
+          aria-pressed="false"
+          title="Toggle theme"
+        >
+          <svg
+            class="sun-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="4"></circle>
+            <path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" />
+          </svg>
+
+          <svg
+            class="moon-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13Z" />
+          </svg>
+        </button>
+      </nav>
+    </header>
+
+    <!-- Signed-out state -->
+    <section id="login-view" class="login-view" hidden>
+      <div class="login-card">
+        <div class="login-icon" aria-hidden="true">R</div>
+
+        <span class="section-label">REPOSITORY INTELLIGENCE</span>
+
+        <h1>
+          Your codebase,
+          <span class="gradient-text">in perspective.</span>
+        </h1>
+
+        <p>
+          Connect your GitHub account to explore repository information,
+          code composition and development insights.
+        </p>
+
+        <a href="/auth/github/login" class="github-login-button">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 .9a11.1 11.1 0 0 0-3.51 21.63c.55.1.76-.24.76-.54v-2.1c-3.1.67-3.75-1.32-3.75-1.32-.5-1.28-1.23-1.62-1.23-1.62-1.01-.69.08-.68.08-.68 1.12.08 1.71 1.15 1.71 1.15 1 .1.75 1.93 3.21 1.47.1-.72.39-1.22.71-1.5-2.47-.28-5.07-1.23-5.07-5.5 0-1.22.44-2.22 1.15-3-.12-.28-.5-1.42.11-2.96 0 0 .94-.3 3.05 1.15a10.6 10.6 0 0 1 5.55 0c2.11-1.45 3.04-1.15 3.04-1.15.61 1.54.23 2.68.11 2.96.72.78 1.15 1.78 1.15 3 0 4.28-2.61 5.21-5.09 5.49.4.35.76 1.02.76 2.06v3.05c0 .3.2.65.77.54A11.1 11.1 0 0 0 12 .9Z" />
+          </svg>
+          Continue with GitHub
+        </a>
+
+        <p class="login-note">
+          GitHub OAuth authentication. Your access token stays on the server.
+        </p>
+
+        <div id="login-message" role="status" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <!-- Signed-in workspace -->
+    <main id="dashboard-view" hidden>
+
+      <!-- Repository search -->
+      <section class="hero">
+        <div class="hero-content">
+
+          <div class="eyebrow">
+            <span class="eyebrow-indicator"></span>
+            REPOSITORY WORKSPACE
+          </div>
+
+          <h1>
+            Understand your codebase
+            <span class="gradient-text">beyond the commits.</span>
+          </h1>
+
+          <p class="hero-description">
+            A clearer view of what's inside a repository.
+            Inspect its structure, understand its languages and
+            explore the details behind the project.
+          </p>
+
+          <div class="section-label">ANALYZE A REPOSITORY</div>
+
+          <form id="repo-form" class="search-form" novalidate>
+            <div class="input-wrapper">
+              <svg
+                class="github-icon"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path d="M12 .9a11.1 11.1 0 0 0-3.51 21.63c.55.1.76-.24.76-.54v-2.1c-3.1.67-3.75-1.32-3.75-1.32-.5-1.28-1.23-1.62-1.23-1.62-1.01-.69.08-.68.08-.68 1.12.08 1.71 1.15 1.71 1.15 1 .1.75 1.93 3.21 1.47.1-.72.39-1.22.71-1.5-2.47-.28-5.07-1.23-5.07-5.5 0-1.22.44-2.22 1.15-3-.12-.28-.5-1.42.11-2.96 0 0 .94-.3 3.05 1.15a10.6 10.6 0 0 1 5.55 0c2.11-1.45 3.04-1.15 3.04-1.15.61 1.54.23 2.68.11 2.96.72.78 1.15 1.78 1.15 3 0 4.28-2.61 5.21-5.09 5.49.4.35.76 1.02.76 2.06v3.05c0 .3.2.65.77.54A11.1 11.1 0 0 0 12 .9Z" />
+              </svg>
+
+              <input
+                type="url"
+                id="repo-url"
+                name="repo-url"
+                placeholder="https://github.com/owner/repository"
+                autocomplete="url"
+                spellcheck="false"
+                aria-label="GitHub repository URL"
+                aria-describedby="input-hint message"
+                required
+              />
+
+              <button
+                type="button"
+                id="clear-button"
+                class="clear-button"
+                aria-label="Clear repository URL"
+                hidden
+              >
+                &times;
+              </button>
+            </div>
+
+            <button
+              type="submit"
+              id="analyze-button"
+              class="analyze-button"
+            >
+              <span class="button-text">Analyze repository</span>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M5 12h14m-7-7 7 7-7 7" />
+              </svg>
+            </button>
+          </form>
+
+          <p class="input-hint" id="input-hint">
+            Enter a GitHub repository URL to get started.
+          </p>
+
+          <div
+            id="message"
+            class="message"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          ></div>
+
+          <div class="hero-meta">
+            <span class="meta-item">
+              <span class="meta-check">✓</span>
+              GitHub-powered data
+            </span>
+
+            <span class="meta-divider"></span>
+
+            <span class="meta-item">
+              <span class="meta-check">✓</span>
+              Built for developers
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Product capabilities -->
+      <section class="features-section">
+        <div class="section-heading">
+          <span class="section-label">INSIDE REPOLENS</span>
+
+          <h2>
+            A closer look at your
+            <span>repository.</span>
+          </h2>
+
+          <p>
+            Start with the project overview. Then dig into the
+            composition and activity behind the code.
+          </p>
+        </div>
+
+        <div class="features">
+          <article class="feature-card">
+            <div class="feature-top">
+              <div class="feature-icon purple-icon" aria-hidden="true">◈</div>
+              <span class="feature-number">01</span>
+            </div>
+
+            <h3>Repository overview</h3>
+
+            <p>
+              Review project details, stars, forks, watchers,
+              open issues and the repository's primary language.
+            </p>
+
+            <span class="feature-link">
+              Project information
+              <span aria-hidden="true">↗</span>
+            </span>
+          </article>
+
+          <article class="feature-card">
+            <div class="feature-top">
+              <div class="feature-icon green-icon" aria-hidden="true">▥</div>
+              <span class="feature-number">02</span>
+            </div>
+
+            <h3>Language composition</h3>
+
+            <p>
+              See which programming languages make up the project,
+              including their relative share and code size.
+            </p>
+
+            <span class="feature-link">
+              Code composition
+              <span aria-hidden="true">↗</span>
+            </span>
+          </article>
+
+          <article class="feature-card">
+            <div class="feature-top">
+              <div class="feature-icon blue-icon" aria-hidden="true">⌘</div>
+              <span class="feature-number">03</span>
+            </div>
+
+            <h3>More repository insights</h3>
+
+            <p>
+              Contributor activity and deeper project analysis
+              are part of the direction we're building towards.
+            </p>
+
+            <span class="feature-link">
+              In development
+              <span aria-hidden="true">↗</span>
+            </span>
+          </article>
+        </div>
+      </section>
+
+      <!-- Closing section -->
+      <section class="bottom-cta">
+        <div>
+          <span class="section-label">A BETTER VIEW OF YOUR CODE</span>
+          <h2>Start with a repository.</h2>
+          <p>Find the details that commits alone don't show.</p>
+        </div>
+
+        <a href="#repo-form" class="cta-link">
+          Analyze a repository
+          <span aria-hidden="true">↑</span>
+        </a>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer" id="footer-view" hidden>
+      <a href="/" class="footer-brand">
+        <span class="footer-brand-icon">R</span>
+        RepoLens<span class="brand-period">.</span>
+      </a>
+
+      <p>Understand your codebase beyond the commits.</p>
+
+      <span class="copyright">
+        © 2026 RepoLens. Built for developers.
+      </span>
+    </footer>
+
+  </div>
+</body>
+</html>

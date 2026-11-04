@@ -19,6 +19,7 @@ javac.*.args
 !gradle/wrapper/gradle-wrapper.jar
 
 # IDEs and editors
+.vscode/
 .idea/
 *.iml
 *.ipr
