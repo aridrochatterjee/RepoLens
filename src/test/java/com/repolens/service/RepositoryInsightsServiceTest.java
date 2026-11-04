@@ -177,6 +177,30 @@ class RepositoryInsightsServiceTest {
         assertEquals(20.0, contributors.contributors().get(1).contributionShare());
     }
 
+    @Test
+    void deduplicatesNamedContributorsAcrossBoundedPages() {
+        ArrayNode duplicated = mapper.createArrayNode();
+        for (int index = 0; index < 100; index++) {
+            ObjectNode contributor = duplicated.addObject();
+            contributor.put("contributions", 8);
+            contributor.putObject("author")
+                    .put("login", "octocat")
+                    .put("avatar_url", "https://avatars.githubusercontent.com/u/1")
+                    .put("html_url", "https://github.com/octocat");
+        }
+        github.contributors = duplicated;
+
+        var contributors = service.analyzeContributors(
+                REPOSITORY_URL,
+                "test-token"
+        );
+
+        assertEquals(1, contributors.totalReturned());
+        assertEquals(1, contributors.contributors().size());
+        assertEquals(8, contributors.contributors().getFirst().contributions());
+        assertTrue(contributors.mayBeTruncated());
+    }
+
     private JsonNode repositoryResponse() {
         ObjectNode repository = mapper.createObjectNode();
         repository.put("id", 1);

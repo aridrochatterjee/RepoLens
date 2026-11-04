@@ -29,6 +29,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.Set;
 import java.util.TreeMap;
 import java.time.DayOfWeek;
@@ -375,7 +376,7 @@ public class RepositoryService {
         var parsed = RepositoryUrlParser.parse(repositoryUrl);
         final int pageSize = 100;
         final int maxPages = 5;
-        List<JsonNode> returnedContributors = new ArrayList<>();
+        Map<String, JsonNode> returnedByIdentity = new LinkedHashMap<>();
         boolean hasMore = false;
 
         for (int page = 1; page <= maxPages; page++) {
@@ -407,7 +408,17 @@ public class RepositoryService {
                         502
                 );
             }
-            response.forEach(returnedContributors::add);
+            int anonymousIndex = 0;
+            for (JsonNode contributor : response) {
+                JsonNode author = contributor.path("author");
+                String login = textOrNull(author.path("login"));
+                String identity = login == null
+                        ? author.path("id").isNumber()
+                                ? "id:" + author.path("id").asLong()
+                                : "anonymous:" + page + ":" + anonymousIndex++
+                        : "login:" + login.toLowerCase(java.util.Locale.ROOT);
+                returnedByIdentity.putIfAbsent(identity, contributor);
+            }
             if (response.size() < pageSize) {
                 break;
             }
@@ -416,6 +427,8 @@ public class RepositoryService {
             }
         }
 
+        List<JsonNode> returnedContributors =
+                new ArrayList<>(returnedByIdentity.values());
         long totalContributions = returnedContributors.stream()
                 .mapToLong(item -> nonNegativeInt(item.path("contributions")))
                 .sum();
@@ -425,8 +438,8 @@ public class RepositoryService {
                     int contributions = nonNegativeInt(
                             item.path("contributions")
                     );
-                    double share = totalContributions == 0
-                            ? 0
+                    Double share = totalContributions == 0
+                            ? null
                             : Math.round(
                                     contributions * 10000.0
                                             / totalContributions
@@ -436,12 +449,24 @@ public class RepositoryService {
                             textOrNull(author.path("avatar_url")),
                             textOrNull(author.path("html_url")),
                             contributions,
-                            share
+                            share,
+                            "Bot".equalsIgnoreCase(textOrNull(
+                                    author.path("type")
+                            )) || textOrNull(author.path("login")) != null
+                                    && textOrNull(author.path("login"))
+                                            .toLowerCase(java.util.Locale.ROOT)
+                                            .endsWith("[bot]")
                     );
                 })
                 .sorted(Comparator.comparingInt(
-                        ContributorStat::contributions
-                ).reversed())
+                                ContributorStat::contributions
+                        ).reversed()
+                        .thenComparing(contributor ->
+                                contributor.login() == null
+                                        ? "" : contributor.login().toLowerCase(
+                                                java.util.Locale.ROOT
+                                        )
+                        ))
                 .toList();
 
         return new ContributorStats(

@@ -99,6 +99,95 @@ public class GitHubApiClient {
         return getJson(endpoint, accessToken);
     }
 
+    public JsonNode getRepositoryPullRequests(
+            String owner,
+            String repository,
+            int page,
+            int limit,
+            String accessToken
+    ) {
+        URI endpoint = URI.create(
+                API_BASE_URL + "/repos/" + owner + "/" + repository
+                        + "/pulls?state=all&sort=updated&direction=desc"
+                        + "&per_page=" + limit + "&page=" + page
+        );
+        return getJson(endpoint, accessToken);
+    }
+
+    public JsonNode getRepositoryIssues(
+            String owner,
+            String repository,
+            int page,
+            int limit,
+            String accessToken
+    ) {
+        URI endpoint = URI.create(
+                API_BASE_URL + "/repos/" + owner + "/" + repository
+                        + "/issues?state=all&sort=updated&direction=desc"
+                        + "&per_page=" + limit + "&page=" + page
+        );
+        return getJson(endpoint, accessToken);
+    }
+
+    public JsonNode getRepositoryCommitsByAuthor(
+            String owner,
+            String repository,
+            String username,
+            int page,
+            int limit,
+            String accessToken
+    ) {
+        String encodedUsername = URLEncoder.encode(
+                username,
+                StandardCharsets.UTF_8
+        );
+        URI endpoint = URI.create(
+                API_BASE_URL + "/repos/" + owner + "/" + repository
+                        + "/commits?author=" + encodedUsername
+                        + "&per_page=" + limit + "&page=" + page
+        );
+        return getJson(endpoint, accessToken);
+    }
+
+    public JsonNode getUser(String username, String accessToken) {
+        URI endpoint = URI.create(
+                API_BASE_URL + "/users/" + URLEncoder.encode(
+                        username,
+                        StandardCharsets.UTF_8
+                )
+        );
+        return getJson(endpoint, accessToken);
+    }
+
+    public JsonNode searchRepositoryIssues(
+            String owner,
+            String repository,
+            String qualifier,
+            String accessToken
+    ) {
+        String query = "repo:" + owner + "/" + repository + " " + qualifier;
+        URI endpoint = URI.create(
+                API_BASE_URL + "/search/issues?q="
+                        + URLEncoder.encode(query, StandardCharsets.UTF_8)
+                        + "&per_page=1"
+        );
+        return getJson(endpoint, accessToken);
+    }
+
+    public JsonNode getPullRequestReviews(
+            String owner,
+            String repository,
+            long pullRequestNumber,
+            String accessToken
+    ) {
+        URI endpoint = URI.create(
+                API_BASE_URL + "/repos/" + owner + "/" + repository
+                        + "/pulls/" + pullRequestNumber
+                        + "/reviews?per_page=100&page=1"
+        );
+        return getJson(endpoint, accessToken);
+    }
+
     public JsonNode getRepositoryTree(
             String owner,
             String repository,
@@ -248,6 +337,7 @@ public class GitHubApiClient {
 
             case 404 -> "Repository not found or inaccessible.";
             case 429 -> "GitHub API rate limit exceeded.";
+            case 422 -> "GitHub could not process this analytics request.";
 
             case 500, 502, 503, 504 ->
                     "GitHub is temporarily unavailable.";
