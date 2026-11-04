@@ -440,6 +440,8 @@ public class RepositoryService {
                     return new ContributorStats(
                             parsed.owner() + "/" + parsed.repository(),
                             null,
+                            null,
+                            null,
                             false,
                             false,
                             List.of(),
@@ -458,6 +460,9 @@ public class RepositoryService {
             for (JsonNode contributor : response) {
                 JsonNode author = contributor.path("author");
                 String login = textOrNull(author.path("login"));
+                if (login != null && login.isBlank()) {
+                    login = null;
+                }
                 String identity = login == null
                         ? author.path("id").isNumber()
                                 ? "id:" + author.path("id").asLong()
@@ -478,20 +483,33 @@ public class RepositoryService {
         long totalContributions = returnedContributors.stream()
                 .mapToLong(item -> nonNegativeInt(item.path("contributions")))
                 .sum();
+        long anonymousContributions = returnedContributors.stream()
+                .filter(item -> {
+                    String login = textOrNull(item.path("author").path("login"));
+                    return login == null || login.isBlank();
+                })
+                .mapToLong(item -> nonNegativeInt(item.path("contributions")))
+                .sum();
+        final boolean contributorResultsTruncated = hasMore;
         List<ContributorStat> contributors = returnedContributors.stream()
                 .map(item -> {
                     JsonNode author = item.path("author");
+                    String login = textOrNull(author.path("login"));
+                    if (login != null && login.isBlank()) {
+                        login = null;
+                    }
                     int contributions = nonNegativeInt(
                             item.path("contributions")
                     );
-                    Double share = totalContributions == 0
+                    Double share = contributorResultsTruncated
+                            || totalContributions == 0
                             ? null
                             : Math.round(
                                     contributions * 10000.0
                                             / totalContributions
                             ) / 100.0;
                     return new ContributorStat(
-                            textOrNull(author.path("login")),
+                            login,
                             textOrNull(author.path("avatar_url")),
                             textOrNull(author.path("html_url")),
                             contributions,
@@ -504,6 +522,7 @@ public class RepositoryService {
                                             .endsWith("[bot]")
                     );
                 })
+                .filter(contributor -> contributor.login() != null)
                 .sorted(Comparator.comparingInt(
                                 ContributorStat::contributions
                         ).reversed()
@@ -517,7 +536,9 @@ public class RepositoryService {
 
         return new ContributorStats(
                 parsed.owner() + "/" + parsed.repository(),
-                contributors.size(),
+                returnedContributors.size(),
+                totalContributions,
+                anonymousContributions,
                 true,
                 hasMore,
                 contributors,
@@ -568,7 +589,7 @@ public class RepositoryService {
                         + " recent commits; GitHub's open-issues count may include pull requests.";
 
         Integer contributorScore = contributors.available()
-                ? Math.min(100, contributors.totalReturned() * 20)
+                ? Math.min(100, contributors.contributors().size() * 20)
                 : null;
         String contributorExplanation = contributors.available()
                 ? contributors.totalReturned()

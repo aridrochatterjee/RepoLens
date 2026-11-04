@@ -1506,7 +1506,7 @@ function loadWorkspaceContent(workspace) {
         const profiles = createWorkspacePanel(
             "workspace-contributor-profile-panel",
             "Contributor activity",
-            "Select a contributor to inspect their public repository activity."
+            "Choose a named account below. GitHub only returns a bounded recent-commit sample; missing activity data is not proof of zero work."
         );
         setInsightMessage(
             profiles,
@@ -1583,8 +1583,9 @@ function renderCollaboration(container, data) {
 
     const metrics = createElement("div", "developer-metrics");
     [
-        [formatNumber(data.contributorsReturned), "contributors returned"],
-        [formatNumber(data.totalContributionsReturned), "contributions in sample"],
+        [formatNumber(data.namedContributors ?? data.contributorsReturned), "named contributors"],
+        [formatNumber(data.totalContributionsReturned), "returned contributions"],
+        [data.anonymousContributions == null ? "—" : formatNumber(data.anonymousContributions), "anonymous contributions"],
         [data.topContributorShare == null ? "—" : `${data.topContributorShare}%`, "top contributor share"],
         [data.botContributors == null ? "—" : formatNumber(data.botContributors), "bot accounts"],
     ].forEach(([value, label]) => {
@@ -2115,13 +2116,6 @@ function renderDeveloperContributors(
     const contributors = Array.isArray(data.contributors)
         ? data.contributors
         : [];
-    if (contributors.length === 0) {
-        setInsightMessage(
-            container,
-            data.limitation || "No contributor data is available."
-        );
-        return;
-    }
 
     const metrics = createElement("div", "developer-metrics");
     const contributionTotal = data.totalContributionsReturned ??
@@ -2129,21 +2123,18 @@ function renderDeveloperContributors(
             (total, contributor) => total + (Number(contributor.contributions) || 0),
             0
         );
-    const contributorCount = data.contributorsReturned ?? data.totalReturned ?? contributors.length;
-    const topShare = data.topContributorShare ??
+    const contributorCount = contributors.length;
+    const anonymousContributions = data.anonymousContributions;
+    const sharesAvailable = data.mayBeTruncated !== true;
+    const topShare = !sharesAvailable
+        ? null
+        : data.topContributorShare ??
         contributors[0]?.contributionShare ?? null;
-    const topFiveShare = data.topFiveContributorShare ??
-        (contributors.length
-            ? contributors.slice(0, 5).reduce(
-                (total, contributor) => total + (Number(contributor.contributionShare) || 0),
-                0
-            )
-            : null);
     [
-        [formatNumber(contributionTotal), "returned contributions"],
-        [formatNumber(contributorCount), "contributors returned"],
+        [contributionTotal == null ? "—" : formatNumber(contributionTotal), "returned contributions"],
+        [formatNumber(contributorCount), "named contributors"],
+        [anonymousContributions == null ? "—" : formatNumber(anonymousContributions), "anonymous contributions"],
         [topShare == null ? "—" : `${Number(topShare).toFixed(1)}%`, "top contributor share"],
-        [topFiveShare == null ? "—" : `${Number(topFiveShare).toFixed(1)}%`, "top five share"],
     ].forEach(([value, label]) => {
         const metric = createElement("div", "developer-metric");
         metric.append(
@@ -2169,9 +2160,32 @@ function renderDeveloperContributors(
     const note = createElement(
         "p",
         "developer-note",
-        `Ranks use GitHub's returned contribution counts. Shares are of the returned subset, not an estimate of effort. ${data.limitation || ""}`
+        `Ranks use GitHub's named contributor counts. Contribution totals include anonymous records; shares use all returned contributions, including anonymous contributions, as the denominator and are hidden when GitHub results are incomplete. ${data.limitation || ""}`
     );
     container.append(note);
+    if (anonymousContributions != null && anonymousContributions > 0) {
+        const anonymous = createElement("p", "anonymous-contributions");
+        anonymous.append(
+            createElement("strong", "", "Anonymous contributions"),
+            createElement(
+                "span",
+                "",
+                `${formatNumber(anonymousContributions)} contributions from GitHub records without an available username. No identity is inferred.`
+            )
+        );
+        container.append(anonymous);
+    }
+    if (contributors.length === 0) {
+        container.append(createElement(
+            "p",
+            "insight-message",
+            anonymousContributions > 0
+                ? "No named contributors are available to rank. Anonymous contributions remain included in the repository total above."
+                : "GitHub returned no named contributors for this repository."
+        ));
+        return;
+    }
+
     const list = createElement("ol", "developer-contributor-list");
     const showCount = { value: 20 };
     const renderRows = () => {
@@ -2189,16 +2203,14 @@ function renderDeveloperContributors(
                 avatar.append(image);
             }
             const details = createElement("div", "developer-contributor-details");
-            const login = contributor.login || "Deleted or unavailable account";
+            const login = contributor.login;
             const select = createElement(
                 "button",
                 "developer-profile-button",
                 login
             );
             select.type = "button";
-            select.disabled = !contributor.login;
             select.addEventListener("click", () => {
-                if (!contributor.login) return;
                 loadContributorProfile(
                     profileContainer,
                     repositoryUrl,
@@ -2218,7 +2230,7 @@ function renderDeveloperContributors(
             ));
             const profileUrl = safeGitHubUrl(contributor.profileUrl);
             if (profileUrl) {
-                const external = createElement("a", "developer-external-link", "GitHub ↗");
+                const external = createElement("a", "developer-external-link", "Profile ↗");
                 external.href = profileUrl;
                 external.target = "_blank";
                 external.rel = "noopener noreferrer";
@@ -2269,16 +2281,22 @@ function renderDeveloperContributors(
 
 function loadContributorProfile(container, repositoryUrl, username, requestId) {
     const profileRequestId = ++contributorProfileRequestId;
-    container.replaceChildren(
-        createElement("p", "insight-loading", `Loading ${username}'s public repository activity...`)
-    );
-    container.setAttribute("aria-busy", "true");
-    void requestInsight(
-        `${CONFIG.endpoints.contributorProfile}/${encodeURIComponent(username)}`,
-        repositoryUrl,
-        requestId,
-        { limit: "30" }
-    ).then((profile) => {
+    const renderLoading = () => {
+        container.replaceChildren(
+            createElement("p", "insight-loading", `Loading ${username}'s public repository activity…`)
+        );
+        container.setAttribute("aria-busy", "true");
+    };
+    const load = () => {
+        renderLoading();
+        return requestInsight(
+            `${CONFIG.endpoints.contributorProfile}/${encodeURIComponent(username)}`,
+            repositoryUrl,
+            requestId,
+            { limit: "30" }
+        );
+    };
+    void load().then((profile) => {
         if (!profile || profileRequestId !== contributorProfileRequestId
                 || requestId !== analysisRequestId) return;
         renderContributorProfile(container, profile);
@@ -2290,6 +2308,24 @@ function loadContributorProfile(container, repositoryUrl, username, requestId) {
             error.message || "Unable to load contributor activity.",
             "error"
         );
+        const retry = createElement("button", "developer-more", "Retry activity request");
+        retry.type = "button";
+        retry.addEventListener("click", () => {
+            void load().then((profile) => {
+                if (!profile || profileRequestId !== contributorProfileRequestId
+                        || requestId !== analysisRequestId) return;
+                renderContributorProfile(container, profile);
+            }).catch((retryError) => {
+                if (profileRequestId !== contributorProfileRequestId
+                        || requestId !== analysisRequestId) return;
+                setInsightMessage(
+                    container,
+                    retryError.message || "Unable to load contributor activity.",
+                    "error"
+                );
+            });
+        });
+        container.append(retry);
     });
 }
 
@@ -2342,8 +2378,16 @@ function renderContributorProfile(container, profile) {
 
     const activityTitle = createElement("h5", "developer-subheading", "Commits by day · last 30 days (returned sample)");
     container.append(activityTitle);
-    container.append(renderDeveloperActivity(profile.commitActivity, "commits"));
     const commits = Array.isArray(profile.recentCommits) ? profile.recentCommits : [];
+    if (commits.length === 0) {
+        container.append(createElement(
+            "p",
+            "insight-message",
+            "GitHub returned no matching commits in the bounded sample. Activity is unavailable here; this does not establish zero repository contributions."
+        ));
+    } else {
+        container.append(renderDeveloperActivity(profile.commitActivity, "commits"));
+    }
     const commitList = createElement("ul", "developer-activity-list");
     commits.slice(0, 10).forEach((commit) => {
         const item = createElement("li", "");

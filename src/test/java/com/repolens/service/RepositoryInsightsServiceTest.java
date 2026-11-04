@@ -126,7 +126,7 @@ class RepositoryInsightsServiceTest {
 
         var health = service.analyzeHealth(REPOSITORY_URL, "test-token");
 
-        assertEquals(70, health.score());
+        assertEquals(60, health.score());
         assertEquals(40, health.availableWeight());
         assertNull(health.factors().get(0).score());
         assertNull(health.factors().get(2).score());
@@ -237,8 +237,36 @@ class RepositoryInsightsServiceTest {
         assertEquals(2, contributors.totalReturned());
         assertEquals("octocat", contributors.contributors().get(0).login());
         assertEquals(8, contributors.contributors().get(0).contributions());
-        assertNull(contributors.contributors().get(1).login());
-        assertEquals(20.0, contributors.contributors().get(1).contributionShare());
+        assertEquals(10L, contributors.totalContributionsReturned());
+        assertEquals(2L, contributors.anonymousContributions());
+        assertEquals(80.0, contributors.contributors().getFirst().contributionShare());
+    }
+
+    @Test
+    void separatesAnonymousRowsAndUsesAllReturnedContributionsAsShareDenominator() {
+        ArrayNode records = mapper.createArrayNode();
+        records.addObject().put("contributions", 8).putObject("author")
+                .put("login", "octocat")
+                .put("avatar_url", "https://avatars.githubusercontent.com/u/1")
+                .put("html_url", "https://github.com/octocat");
+        records.addObject().put("contributions", 2).putNull("author");
+        records.addObject().put("contributions", 3).putObject("author");
+        records.addObject().put("contributions", 7).putObject("author")
+                .putNull("login");
+        records.addObject().put("contributions", 5).putObject("author")
+                .put("login", "   ");
+        github.contributors = records;
+
+        var contributors = service.analyzeContributors(
+                REPOSITORY_URL,
+                "test-token"
+        );
+
+        assertEquals(1, contributors.contributors().size());
+        assertEquals("octocat", contributors.contributors().getFirst().login());
+        assertEquals(25L, contributors.totalContributionsReturned());
+        assertEquals(17L, contributors.anonymousContributions());
+        assertEquals(32.0, contributors.contributors().getFirst().contributionShare());
     }
 
     @Test
@@ -263,6 +291,7 @@ class RepositoryInsightsServiceTest {
         assertEquals(1, contributors.contributors().size());
         assertEquals(8, contributors.contributors().getFirst().contributions());
         assertTrue(contributors.mayBeTruncated());
+        assertNull(contributors.contributors().getFirst().contributionShare());
     }
 
     private JsonNode repositoryResponse() {
