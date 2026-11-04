@@ -11,16 +11,30 @@
    --------------------------------------------------------- */
 
 const elements = {
+    appShell: document.getElementById("app-shell"),
     themeToggle: document.getElementById("theme-toggle"),
     themeColorMeta: document.querySelector('meta[name="theme-color"]'),
 
     loginView: document.getElementById("login-view"),
     dashboardView: document.getElementById("dashboard-view"),
     footerView: document.getElementById("footer-view"),
+    workspaceWelcome: document.getElementById("workspace-welcome"),
+    workspaceContext: document.getElementById("workspace-context"),
+    workspaceRepositoryContext: document.getElementById("workspace-repository-context"),
+    sidebarToggle: document.getElementById("sidebar-toggle"),
+    sidebar: document.getElementById("workspace-sidebar"),
+    sidebarBackdrop: document.getElementById("sidebar-backdrop"),
+    analysisNavigation: document.getElementById("analysis-navigation"),
+    workspaceOverview: document.getElementById("workspace-overview"),
+    workspacePage: document.getElementById("workspace-view"),
+    repositoryDashboard: document.getElementById("repository-dashboard"),
 
     userProfile: document.getElementById("user-profile"),
     userAvatar: document.getElementById("user-avatar"),
     userName: document.getElementById("user-name"),
+    userProfileLink: document.getElementById("user-profile-link"),
+    profileMenu: document.getElementById("profile-menu"),
+    profileMenuToggle: document.getElementById("profile-menu-toggle"),
     logoutButton: document.getElementById("logout-button"),
     loginMessage: document.getElementById("login-message"),
 
@@ -34,6 +48,17 @@ const elements = {
 
 let analysisRequestId = 0;
 let contributorProfileRequestId = 0;
+const applicationState = {
+    repository: null,
+    repositoryUrl: null,
+    activeWorkspace: "dashboard",
+    workspaceData: new Map(),
+    codebaseData: null,
+    selectedFile: null,
+    fileRequestId: 0,
+    fileObjectUrl: null,
+    pendingDirectory: null,
+};
 
 
 /* 02. Configuration
@@ -50,11 +75,13 @@ const CONFIG = {
         health: "/api/repository/health",
         activity: "/api/repository/activity",
         commits: "/api/repository/commits",
+        contributors: "/api/repository/contributors",
         contributorProfile: "/api/repository/contributors",
         pullRequests: "/api/repository/pull-requests",
         issues: "/api/repository/issues",
         collaboration: "/api/repository/collaboration",
         codebase: "/api/repository/codebase",
+        file: "/api/repository/file",
     },
 
     languageColors: {
@@ -98,8 +125,29 @@ async function readJson(response) {
     try {
         return await response.json();
     } catch {
-        return {};
+        if (!response.ok) return {};
+        throw new Error("RepoLens returned an invalid response.");
     }
+}
+
+async function apiRequest(endpoint, options = {}) {
+    const { headers = {}, ...requestOptions } = options;
+    const response = await fetch(endpoint, {
+        ...requestOptions,
+        credentials: "same-origin",
+        headers: {
+            Accept: "application/json",
+            ...headers,
+        },
+    });
+    return { response, data: await readJson(response) };
+}
+
+function handleAuthenticationExpired(response) {
+    if (response.status !== 401) return false;
+    analysisRequestId += 1;
+    showLogin("Your session has expired. Please sign in again.");
+    return true;
 }
 
 function createElement(tag, className, text) {
@@ -196,7 +244,7 @@ function applyTheme(theme) {
     if (elements.themeColorMeta) {
         elements.themeColorMeta.setAttribute(
             "content",
-            isLight ? "#faf9fc" : "#0d0c10"
+            isLight ? "#f6f8fa" : "#0d1117"
         );
     }
 
@@ -217,6 +265,126 @@ function initializeTheme() {
     });
 }
 
+function closeMobileNavigation(restoreFocus = true) {
+    if (!elements.appShell) return;
+    const wasOpen = elements.appShell.classList.contains("navigation-open");
+    elements.appShell.classList.remove("navigation-open");
+    document.body.classList.remove("navigation-locked");
+    elements.sidebarBackdrop.hidden = true;
+    elements.sidebarToggle.setAttribute("aria-expanded", "false");
+    if (window.matchMedia("(max-width: 800px)").matches) {
+        elements.sidebarToggle.setAttribute("aria-label", "Open workspace navigation");
+    } else {
+        const collapsed = elements.appShell.classList.contains("sidebar-collapsed");
+        elements.sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
+        elements.sidebarToggle.setAttribute(
+            "aria-label",
+            collapsed ? "Expand workspace navigation" : "Collapse workspace navigation"
+        );
+    }
+    if (wasOpen && restoreFocus) elements.sidebarToggle.focus();
+}
+
+function closeProfileMenu(restoreFocus = true) {
+    if (!elements.profileMenu || elements.profileMenu.hidden) return;
+    elements.profileMenu.hidden = true;
+    elements.profileMenuToggle.setAttribute("aria-expanded", "false");
+    if (restoreFocus) elements.profileMenuToggle.focus();
+}
+
+function initializeNavigationControls() {
+    const isMobile = () => window.matchMedia("(max-width: 800px)").matches;
+
+    elements.sidebarToggle.addEventListener("click", () => {
+        if (isMobile()) {
+            const opening = !elements.appShell.classList.contains("navigation-open");
+            if (opening) {
+                elements.appShell.classList.add("navigation-open");
+                document.body.classList.add("navigation-locked");
+                elements.sidebarBackdrop.hidden = false;
+                elements.sidebarToggle.setAttribute("aria-expanded", "true");
+                elements.sidebarToggle.setAttribute("aria-label", "Close workspace navigation");
+                elements.sidebar.querySelector(".nav-item:not([hidden])")?.focus();
+            } else {
+                closeMobileNavigation();
+            }
+            return;
+        }
+
+        const collapsed = elements.appShell.classList.toggle("sidebar-collapsed");
+        elements.sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
+        elements.sidebarToggle.setAttribute(
+            "aria-label",
+            collapsed ? "Expand workspace navigation" : "Collapse workspace navigation"
+        );
+    });
+
+    elements.sidebarBackdrop.addEventListener("click", () => closeMobileNavigation());
+
+    elements.sidebar.querySelectorAll(".nav-item").forEach((link) => {
+        link.addEventListener("click", (event) => {
+            const workspace = link.dataset.workspace;
+            if (!workspace) return;
+            event.preventDefault();
+            if (isMobile()) closeMobileNavigation(false);
+            navigateWorkspace(workspace);
+        });
+    });
+
+    window.addEventListener("popstate", () => {
+        const workspace = window.location.hash.slice(1) || "dashboard";
+        navigateWorkspace(workspace, false);
+    });
+
+    elements.profileMenuToggle.addEventListener("click", () => {
+        const opening = elements.profileMenu.hidden;
+        elements.profileMenu.hidden = !opening;
+        elements.profileMenuToggle.setAttribute("aria-expanded", String(opening));
+        if (opening) {
+            elements.profileMenu.querySelector("a:not([hidden]), button:not([hidden])")?.focus();
+        }
+    });
+
+    document.addEventListener("click", (event) => {
+        if (!elements.userProfile.contains(event.target)) closeProfileMenu(false);
+    });
+
+    document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+            if (elements.appShell.classList.contains("navigation-open")) {
+                closeMobileNavigation();
+            } else {
+                closeProfileMenu();
+            }
+            return;
+        }
+
+        if (event.key !== "Tab" || !elements.appShell.classList.contains("navigation-open")) {
+            return;
+        }
+
+        const focusable = Array.from(
+            elements.sidebar.querySelectorAll("a[href], button:not(:disabled)")
+        ).filter((item) => !item.closest("[hidden]"));
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+        }
+    });
+
+    window.addEventListener("resize", () => closeMobileNavigation(false));
+
+    if (!isMobile()) {
+        elements.sidebarToggle.setAttribute("aria-label", "Collapse workspace navigation");
+        elements.sidebarToggle.setAttribute("aria-expanded", "true");
+    }
+}
 
 /* 05. Message handling
    --------------------------------------------------------- */
@@ -250,6 +418,12 @@ function showLogin(messageText = "") {
     elements.dashboardView.hidden = true;
     elements.footerView.hidden = true;
     elements.userProfile.hidden = true;
+    elements.workspaceContext.hidden = true;
+    elements.sidebarToggle.hidden = true;
+    elements.analysisNavigation.hidden = true;
+    elements.workspaceWelcome.hidden = false;
+    closeMobileNavigation(false);
+    closeProfileMenu(false);
 
     showLoginMessage(messageText);
 }
@@ -259,8 +433,23 @@ function showDashboard(user) {
     elements.dashboardView.hidden = false;
     elements.footerView.hidden = false;
     elements.userProfile.hidden = false;
+    elements.sidebarToggle.hidden = false;
+    elements.analysisNavigation.hidden = !applicationState.repository;
+    elements.workspaceContext.hidden =
+        !applicationState.repository;
+    elements.workspaceWelcome.hidden =
+        Boolean(applicationState.repository);
 
     elements.userName.textContent = user.name || user.username || "GitHub user";
+    const profileUrl = user.username
+        ? safeGitHubUrl(`https://github.com/${encodeURIComponent(user.username)}`)
+        : null;
+    if (profileUrl) {
+        elements.userProfileLink.href = profileUrl;
+        elements.userProfileLink.hidden = false;
+    } else {
+        elements.userProfileLink.hidden = true;
+    }
 
     if (user.avatarUrl) {
         elements.userAvatar.src = user.avatarUrl;
@@ -275,24 +464,21 @@ function showDashboard(user) {
         : "GitHub profile avatar";
 
     showLoginMessage("");
+    navigateWorkspace(applicationState.activeWorkspace, false);
 }
 
 async function checkAuthentication() {
     try {
-        const response = await fetch(CONFIG.endpoints.currentUser, {
-            method: "GET",
-            credentials: "same-origin",
-            headers: {
-                Accept: "application/json",
-            },
-        });
+        const { response, data: payload } = await apiRequest(
+            CONFIG.endpoints.currentUser,
+            { method: "GET" }
+        );
 
         if (!response.ok) {
             showLogin();
             return false;
         }
 
-        const payload = await readJson(response);
         const user = payload?.user;
 
         if (
@@ -320,10 +506,10 @@ async function logout() {
     analysisRequestId += 1;
 
     try {
-        const response = await fetch(CONFIG.endpoints.logout, {
-            method: "POST",
-            credentials: "same-origin",
-        });
+        const { response } = await apiRequest(
+            CONFIG.endpoints.logout,
+            { method: "POST" }
+        );
 
         if (!response.ok) {
             showMessage("Logout failed. Please try again.", "error");
@@ -438,27 +624,37 @@ function validateGitHubRepository(input) {
    --------------------------------------------------------- */
 
 function removeRepositoryResult() {
-    document.getElementById("repository-result")?.remove();
+    applicationState.repository = null;
+    applicationState.repositoryUrl = null;
+    applicationState.workspaceData.clear();
+    applicationState.codebaseData = null;
+    applicationState.selectedFile = null;
+    applicationState.fileRequestId += 1;
+    if (applicationState.fileObjectUrl) {
+        URL.revokeObjectURL(applicationState.fileObjectUrl);
+        applicationState.fileObjectUrl = null;
+    }
+    elements.repositoryDashboard.replaceChildren();
+    elements.repositoryDashboard.hidden = true;
+    elements.workspacePage.replaceChildren();
+    elements.workspacePage.hidden = true;
+    elements.workspaceOverview.hidden = false;
+    elements.workspaceWelcome.hidden = false;
+    elements.workspaceContext.hidden = true;
+    elements.analysisNavigation.hidden = true;
+    window.history.replaceState(
+        { workspace: "dashboard" },
+        "",
+        `${window.location.pathname}#dashboard`
+    );
+    navigateWorkspace("dashboard", false);
 }
 
 function showRepositoryResult(repository) {
-    let resultSection = document.getElementById("repository-result");
-
-    if (!resultSection) {
-        resultSection = createElement(
-            "section",
-            "repository-result"
-        );
-
-        resultSection.id = "repository-result";
-
-        elements.repoForm.insertAdjacentElement(
-            "afterend",
-            resultSection
-        );
-    }
-
-    resultSection.replaceChildren();
+    applicationState.repository = repository;
+    const resultSection = createElement("section", "repository-result");
+    resultSection.id = "repository-result";
+    resultSection.setAttribute("aria-labelledby", "repository-result-heading");
 
     const heading = createElement("div", "repository-heading");
     const headingTitle = createElement(
@@ -466,6 +662,7 @@ function showRepositoryResult(repository) {
         "",
         repository.full_name || repository.name || "Repository"
     );
+    headingTitle.id = "repository-result-heading";
     const repositoryLink = safeGitHubUrl(repository.html_url);
     if (repositoryLink) {
         const link = createElement("a", "repository-github-link", "View on GitHub ↗");
@@ -477,16 +674,6 @@ function showRepositoryResult(repository) {
         heading.append(headingTitle);
     }
 
-    heading.append(
-        createElement(
-            "span",
-            "repository-visibility",
-            typeof repository.private === "boolean"
-                ? repository.private ? "Private" : "Public"
-                : "Visibility unavailable"
-        )
-    );
-
     const description = createElement(
         "p",
         "repository-description",
@@ -495,51 +682,576 @@ function showRepositoryResult(repository) {
 
     const metadata = createElement("div", "repository-metadata");
     metadata.append(
-        createElement(
-            "span",
-            "",
-            `Primary language: ${repository.language || "Not specified"}`
-        )
+        createElement("span", "repository-visibility",
+            typeof repository.private === "boolean"
+                ? repository.private ? "Private repository" : "Public repository"
+                : "Visibility unavailable"),
+        createElement("span", "", repository.language || "Language unavailable")
     );
 
-    const stats = [
-        ["Stars", repository.stargazers_count],
-        ["Forks", repository.forks_count],
-        ["Watchers", repository.watchers_count],
-        ["Open issues", repository.open_issues_count],
-    ];
-
     const statsContainer = createElement("div", "repository-stats");
-
-    stats.forEach(([label, value]) => {
-        const card = createElement("div", "repository-stat");
-
-        const number = createElement(
-            "strong",
-            "",
-            value === null || value === undefined || !Number.isFinite(Number(value))
-                ? "—"
-                : formatNumber(value)
-        );
-
-        const caption = createElement("span", "", label);
-
-        card.append(number, caption);
-        statsContainer.append(card);
+    [["Stars", repository.stargazers_count], ["Forks", repository.forks_count]]
+        .forEach(([label, value]) => {
+            const stat = createElement("span", "repository-stat");
+            stat.append(
+                createElement("strong", "", value == null ? "—" : formatNumber(value)),
+                createElement("span", "", label)
+            );
+            statsContainer.append(stat);
+        });
+    const summary = createElement("div", "overview-summary-grid");
+    [["Repository health", "Loading…", "health"], ["Commits · 30 days", "Loading…", "commits"], ["Open items", repository.open_issues_count == null ? "—" : formatNumber(repository.open_issues_count), "open-items"]]
+        .forEach(([label, value, key]) => {
+            const metric = createElement("article", "overview-metric");
+            metric.dataset.metric = key;
+            metric.append(createElement("span", "", label), createElement("strong", "", value));
+            if (key === "health") {
+                const link = createElement("a", "text-link", "View breakdown");
+                link.href = "#insights";
+                link.addEventListener("click", (event) => {
+                    event.preventDefault();
+                    navigateWorkspace("insights");
+                });
+                metric.append(link);
+            }
+            summary.append(metric);
+        });
+    const visuals = createElement("div", "overview-visual-grid");
+    const activityPanel = createInsightPanel(
+        "overview-activity",
+        "Recent activity",
+        "Weekly commits · last 30 days"
+    );
+    const languagePanel = createInsightPanel(
+        "overview-language",
+        "Language distribution",
+        "GitHub-reported language bytes"
+    );
+    visuals.append(activityPanel.panel, languagePanel.panel);
+    const recentPanel = createInsightPanel(
+        "overview-recent",
+        "Recent commits",
+        "Latest changes on the default branch"
+    );
+    const explore = createElement("nav", "overview-explore-links");
+    explore.setAttribute("aria-label", "Explore more repository workspaces");
+    [
+        ["Repository insights", "insights"],
+        ["Code explorer", "code-explorer"],
+        ["Contributors", "contributors"],
+        ["Pull requests", "pull-requests"],
+        ["Issues", "issues"],
+    ].forEach(([label, workspace]) => {
+        const link = createElement("a", "text-link", label);
+        link.href = `#${workspace}`;
+        link.addEventListener("click", (event) => {
+            event.preventDefault();
+            navigateWorkspace(workspace);
+        });
+        explore.append(link);
     });
+    resultSection.append(
+        heading,
+        description,
+        metadata,
+        statsContainer,
+        summary,
+        visuals,
+        recentPanel.panel,
+        explore
+    );
+    elements.repositoryDashboard.replaceChildren(resultSection);
+    elements.repositoryDashboard.hidden = false;
+    elements.workspaceWelcome.hidden = true;
+    elements.workspaceContext.hidden = false;
+    elements.workspaceRepositoryContext.textContent =
+        repository.full_name || repository.name || "Repository workspace";
+    elements.analysisNavigation.hidden = false;
+    applicationState.workspaceData.clear();
+    void loadOverview(applicationState.repositoryUrl, analysisRequestId, {
+        activity: activityPanel.body,
+        language: languagePanel.body,
+        commits: recentPanel.body,
+    });
+}
 
-    if (repository.language) {
-        metadata.append(
-            createElement("span", "repository-language-tag", repository.language)
-        );
+const WORKSPACE_COPY = {
+    insights: ["Repository insights", "Health, activity and commit history from GitHub."],
+    "code-explorer": ["Code explorer", "Browse tracked files and open source in RepoLens."],
+    "code-composition": ["Code composition", "Explore languages, file types and tracked code size."],
+    "directory-analysis": ["Directory analysis", "Compare directory footprint and review structural observations."],
+    contributors: ["Contributors", "Explore the returned contributor leaderboard and public profiles."],
+    "pull-requests": ["Pull requests", "Review PR lifecycle, activity, merge and review signals."],
+    issues: ["Issues", "Review issue activity, labels and resolution signals."],
+    collaboration: ["Collaboration", "Understand contribution distribution and evidence-based observations."],
+    settings: ["Settings", "Adjust the appearance and application preferences."],
+    "code-viewer": ["Source viewer", "Read repository source without leaving RepoLens."],
+};
+
+function navigateWorkspace(workspace, pushHistory = true) {
+    const knownWorkspace = workspace === "dashboard"
+        || Object.hasOwn(WORKSPACE_COPY, workspace);
+    if (!knownWorkspace) workspace = "dashboard";
+    if (!applicationState.repository
+            && workspace !== "dashboard" && workspace !== "settings") {
+        workspace = "dashboard";
+    }
+    if (workspace === "code-viewer" && !applicationState.selectedFile) {
+        workspace = "code-explorer";
     }
 
-    resultSection.append(heading, description, metadata, statsContainer);
-
-    resultSection.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
+    applicationState.activeWorkspace = workspace;
+    elements.workspaceOverview.hidden = workspace !== "dashboard";
+    elements.workspacePage.hidden = workspace === "dashboard";
+    elements.sidebar.querySelectorAll("[data-workspace]").forEach((link) => {
+        const selected = workspace === "code-viewer"
+            ? link.dataset.workspace === "code-explorer"
+            : link.dataset.workspace === workspace;
+        link.classList.toggle("active", selected);
+        link.setAttribute("aria-current", selected ? "page" : "false");
     });
+
+    if (pushHistory && window.location.hash !== `#${workspace}`) {
+        window.history.pushState({ workspace }, "", `#${workspace}`);
+    }
+    if (workspace === "dashboard") return;
+    renderWorkspace(workspace);
+}
+
+function renderWorkspace(workspace) {
+    elements.workspacePage.replaceChildren();
+    const [title, description] = WORKSPACE_COPY[workspace];
+    const heading = createElement("header", "workspace-page-heading");
+    const headingText = createElement("div", "");
+    const breadcrumb = createElement("p", "workspace-breadcrumb", `Workspace / ${title}`);
+    const titleElement = createElement("h1", "", title);
+    titleElement.tabIndex = -1;
+    headingText.append(breadcrumb, titleElement, createElement("p", "workspace-page-description", description));
+    heading.append(headingText);
+    elements.workspacePage.append(heading);
+    elements.workspacePage.hidden = false;
+    window.setTimeout(() => titleElement.focus({ preventScroll: true }), 0);
+
+    if (workspace === "settings") {
+        renderSettingsWorkspace();
+    } else if (workspace === "code-viewer") {
+        renderSelectedFile();
+    } else {
+        loadWorkspaceContent(workspace);
+    }
+}
+
+function renderSettingsWorkspace() {
+    const section = createElement("section", "settings-section");
+    section.append(
+        createElement("h2", "", "Appearance"),
+        createElement("p", "", "Choose the color theme used across your RepoLens workspace.")
+    );
+    const themeButton = createElement(
+        "button",
+        "button-secondary",
+        document.documentElement.dataset.theme === "dark"
+            ? "Switch to light theme"
+            : "Switch to dark theme"
+    );
+    themeButton.type = "button";
+    themeButton.addEventListener("click", () => {
+        const nextTheme = document.documentElement.dataset.theme === "dark"
+            ? "light"
+            : "dark";
+        applyTheme(nextTheme);
+        themeButton.textContent = nextTheme === "dark"
+            ? "Switch to light theme"
+            : "Switch to dark theme";
+    });
+    section.append(themeButton);
+    elements.workspacePage.append(section);
+}
+
+function createWorkspacePanel(className, title, description) {
+    const panel = createInsightPanel(className, title, description);
+    panel.panel.classList.add("workspace-panel");
+    elements.workspacePage.append(panel.panel);
+    return panel.body;
+}
+
+async function loadWorkspaceData(
+    cacheKey,
+    endpoint,
+    body,
+    renderer,
+    parameters = {}
+) {
+    const requestId = analysisRequestId;
+    if (applicationState.workspaceData.has(cacheKey)) {
+        renderer(body, applicationState.workspaceData.get(cacheKey));
+        return;
+    }
+
+    body.setAttribute("aria-busy", "true");
+    body.replaceChildren(createElement("p", "insight-loading", "Loading repository data…"));
+    try {
+        const data = await requestInsight(
+            endpoint,
+            applicationState.repositoryUrl,
+            requestId,
+            parameters
+        );
+        if (!data || requestId !== analysisRequestId) return;
+        applicationState.workspaceData.set(cacheKey, data);
+        renderer(body, data);
+    } catch (error) {
+        if (requestId !== analysisRequestId) return;
+        console.error(`Unable to load ${cacheKey}:`, error);
+        setInsightMessage(
+            body,
+            error.message || "Unable to load this workspace.",
+            "error"
+        );
+    }
+}
+
+function loadCodebaseWorkspace(body, mode) {
+    const render = (target, data) => renderCodebase(target, data, mode);
+    if (applicationState.codebaseData) {
+        render(body, applicationState.codebaseData);
+        return;
+    }
+    const requestId = analysisRequestId;
+    body.setAttribute("aria-busy", "true");
+    body.replaceChildren(createElement("p", "insight-loading", "Loading repository tree…"));
+    void requestInsight(
+        CONFIG.endpoints.codebase,
+        applicationState.repositoryUrl,
+        requestId,
+        { limit: "30" }
+    ).then((data) => {
+        if (!data || requestId !== analysisRequestId) return;
+        applicationState.codebaseData = data;
+        render(body, data);
+    }).catch((error) => {
+        if (requestId !== analysisRequestId) return;
+        console.error("Unable to load codebase analysis:", error);
+        setInsightMessage(
+            body,
+            error.message || "Unable to load repository files.",
+            "error"
+        );
+    });
+}
+
+function loadWorkspaceContent(workspace) {
+    if (workspace === "insights") {
+        const health = createWorkspacePanel(
+            "workspace-health-panel",
+            "Repository health",
+            "An explainable RepoLens estimate, with the evidence behind it."
+        );
+        const activity = createWorkspacePanel(
+            "workspace-activity-panel",
+            "Commit activity",
+            "Weekly commits across the last 30 days."
+        );
+        const commits = createWorkspacePanel(
+            "workspace-commits-panel",
+            "Commit history",
+            "Recent changes on the default branch."
+        );
+        void loadWorkspaceData("health", CONFIG.endpoints.health, health, renderHealth);
+        void loadWorkspaceData("activity", CONFIG.endpoints.activity, activity, renderActivity);
+        void loadCommitPage(commits, applicationState.repositoryUrl, 1, analysisRequestId);
+        return;
+    }
+    if (workspace === "code-explorer"
+            || workspace === "code-composition"
+            || workspace === "directory-analysis") {
+        const title = workspace === "code-explorer"
+            ? "Repository files"
+            : workspace === "code-composition"
+                ? "Tracked code composition"
+                : "Directory footprint";
+        const body = createWorkspacePanel(
+            `workspace-${workspace}-panel`,
+            title,
+            workspace === "code-explorer"
+                ? "Choose a directory, filter its entries, and open source files here."
+                : workspace === "code-composition"
+                    ? "Composition is inferred from tracked file names and GitHub language statistics."
+                    : "Directory sizes use reported Git blob bytes; nested directory shares overlap."
+        );
+        if (workspace === "code-composition") {
+            const languageBody = createWorkspacePanel(
+                "workspace-language-panel",
+                "Language distribution",
+                "GitHub-reported language bytes."
+            );
+            loadCodebaseWorkspace(body, "code-composition");
+            void loadWorkspaceData(
+                "languages",
+                CONFIG.endpoints.languages,
+                languageBody,
+                renderLanguageAnalytics
+            );
+        } else {
+            loadCodebaseWorkspace(
+                body,
+                workspace === "code-explorer" ? "code-explorer" : "directory-analysis"
+            );
+        }
+        return;
+    }
+
+    if (workspace === "contributors") {
+        const leaderboard = createWorkspacePanel(
+            "workspace-contributors-panel",
+            "Contributor leaderboard",
+            "Ranks reflect GitHub's returned contribution counts, not individual effort."
+        );
+        const profiles = createWorkspacePanel(
+            "workspace-contributor-profile-panel",
+            "Contributor activity",
+            "Select a contributor to inspect their public repository activity."
+        );
+        setInsightMessage(
+            profiles,
+            "Select a contributor from the leaderboard to load their public activity."
+        );
+        void loadWorkspaceData(
+            "contributors",
+            CONFIG.endpoints.contributors,
+            leaderboard,
+            (target, data) => renderDeveloperContributors(
+                target,
+                data,
+                applicationState.repositoryUrl,
+                analysisRequestId,
+                profiles
+            )
+        );
+        return;
+    }
+
+    if (workspace === "pull-requests" || workspace === "issues") {
+        const isPullRequest = workspace === "pull-requests";
+        const body = createWorkspacePanel(
+            `workspace-${workspace}-panel`,
+            isPullRequest ? "Pull request activity" : "Issue activity",
+            "Counts and trends are limited to the GitHub records returned for this repository."
+        );
+        const endpoint = isPullRequest
+            ? CONFIG.endpoints.pullRequests
+            : CONFIG.endpoints.issues;
+        const renderer = isPullRequest
+            ? renderPullRequestAnalytics
+            : renderIssueAnalytics;
+        void loadWorkspaceData(
+            workspace,
+            endpoint,
+            body,
+            (target, data) => renderer(
+                target,
+                data,
+                applicationState.repositoryUrl,
+                analysisRequestId
+            ),
+            { period: "30", page: "1", limit: "100" }
+        );
+        return;
+    }
+
+    if (workspace === "collaboration") {
+        const body = createWorkspacePanel(
+            "workspace-collaboration-panel",
+            "Collaboration signals",
+            "Evidence from the returned contributor sample; no productivity or quality scores."
+        );
+        void loadWorkspaceData(
+            "collaboration",
+            CONFIG.endpoints.collaboration,
+            body,
+            renderCollaboration
+        );
+    }
+}
+
+function renderCollaboration(container, data) {
+    container.replaceChildren();
+    container.setAttribute("aria-busy", "false");
+    if (!data.available) {
+        setInsightMessage(
+            container,
+            data.limitation || "Collaboration data is unavailable."
+        );
+        return;
+    }
+
+    const metrics = createElement("div", "developer-metrics");
+    [
+        [formatNumber(data.contributorsReturned), "contributors returned"],
+        [formatNumber(data.totalContributionsReturned), "contributions in sample"],
+        [data.topContributorShare == null ? "—" : `${data.topContributorShare}%`, "top contributor share"],
+        [data.botContributors == null ? "—" : formatNumber(data.botContributors), "bot accounts"],
+    ].forEach(([value, label]) => {
+        const metric = createElement("div", "developer-metric");
+        metric.append(createElement("strong", "", value), createElement("span", "", label));
+        metrics.append(metric);
+    });
+    container.append(metrics);
+
+    const observations = Array.isArray(data.observations) ? data.observations : [];
+    if (observations.length === 0) {
+        container.append(createElement("p", "insight-message", "No collaboration observations were returned."));
+    } else {
+        const list = createElement("ul", "collaboration-observations");
+        observations.forEach((observation) => {
+            const item = createElement("li", "collaboration-observation");
+            item.append(
+                createElement("strong", "", observation.title),
+                createElement("span", "", observation.evidence)
+            );
+            list.append(item);
+        });
+        container.append(list);
+    }
+    container.append(createElement(
+        "p",
+        "developer-note",
+        `Shares describe the returned subset, not effort or productivity. ${data.limitation || ""}`
+    ));
+}
+
+async function loadOverviewResource(endpoint, repositoryUrl, requestId, parameters = {}) {
+    return requestInsight(endpoint, repositoryUrl, requestId, parameters);
+}
+
+async function loadOverview(repositoryUrl, requestId, panels) {
+    const healthMetric = elements.repositoryDashboard.querySelector('[data-metric="health"] strong');
+    const commitMetric = elements.repositoryDashboard.querySelector('[data-metric="commits"] strong');
+    const resources = [
+        loadOverviewResource(CONFIG.endpoints.health, repositoryUrl, requestId)
+            .then((data) => {
+                if (!data || requestId !== analysisRequestId) return;
+                const score = data.score;
+                if (healthMetric) {
+                    healthMetric.textContent = score == null ? "—" : `${score}/100`;
+                }
+            })
+            .catch((error) => showOverviewMetricError(healthMetric, error, requestId)),
+        loadOverviewResource(CONFIG.endpoints.activity, repositoryUrl, requestId)
+            .then((data) => {
+                if (!data || requestId !== analysisRequestId) return;
+                if (commitMetric) {
+                    commitMetric.textContent = data.totalCommits == null
+                        ? "—"
+                        : formatNumber(data.totalCommits);
+                }
+                renderActivity(panels.activity, data);
+            })
+            .catch((error) => showOverviewError(panels.activity, error, requestId)),
+        loadOverviewResource(CONFIG.endpoints.languages, repositoryUrl, requestId)
+            .then((data) => {
+                if (!data || requestId !== analysisRequestId) return;
+                renderOverviewLanguages(panels.language, data);
+            })
+            .catch((error) => showOverviewError(panels.language, error, requestId)),
+        loadOverviewResource(
+            CONFIG.endpoints.commits,
+            repositoryUrl,
+            requestId,
+            { page: "1", limit: "5" }
+        )
+            .then((data) => {
+                if (!data || requestId !== analysisRequestId) return;
+                renderRecentCommits(panels.commits, data);
+            })
+            .catch((error) => showOverviewError(panels.commits, error, requestId)),
+    ];
+    await Promise.all(resources);
+}
+
+function showOverviewError(container, error, requestId) {
+    if (requestId !== analysisRequestId) return;
+    console.error("Overview data request failed:", error);
+    setInsightMessage(
+        container,
+        error.message || "Unable to load this overview data.",
+        "error"
+    );
+}
+
+function showOverviewMetricError(metric, error, requestId) {
+    if (requestId !== analysisRequestId) return;
+    console.error("Overview metric request failed:", error);
+    if (metric) metric.textContent = "Unavailable";
+}
+
+function renderOverviewLanguages(container, data) {
+    container.replaceChildren();
+    container.setAttribute("aria-busy", "false");
+    const languages = Array.isArray(data.languages)
+        ? data.languages.filter((item) => item && Number(item.bytes) > 0)
+        : [];
+    if (languages.length === 0) {
+        setInsightMessage(container, "No language statistics are available.");
+        return;
+    }
+    const distribution = createElement("div", "language-distribution");
+    distribution.setAttribute("role", "img");
+    distribution.setAttribute(
+        "aria-label",
+        languages.map((item) => `${item.language}: ${item.percentage}%`).join(", ")
+    );
+    languages.forEach((item, index) => {
+        const segment = createElement("span", "language-segment");
+        segment.style.width = `${Math.max(0, Math.min(100, Number(item.percentage) || 0))}%`;
+        segment.style.backgroundColor = getLanguageColor(item.language, index);
+        segment.title = `${item.language}: ${Number(item.percentage).toFixed(1)}%`;
+        distribution.append(segment);
+    });
+    const list = createElement("ul", "overview-language-list");
+    languages.slice(0, 5).forEach((item, index) => {
+        const row = createElement("li", "");
+        const swatch = createElement("span", "language-dot");
+        swatch.style.backgroundColor = getLanguageColor(item.language, index);
+        row.append(
+            swatch,
+            createElement("span", "", item.language),
+            createElement("strong", "", `${Number(item.percentage).toFixed(1)}%`)
+        );
+        list.append(row);
+    });
+    container.append(distribution, list);
+}
+
+function renderRecentCommits(container, data) {
+    container.replaceChildren();
+    container.setAttribute("aria-busy", "false");
+    const commits = Array.isArray(data.commits) ? data.commits : [];
+    if (commits.length === 0) {
+        setInsightMessage(container, "No recent commits were returned.");
+        return;
+    }
+    const list = createElement("ol", "recent-commit-list");
+    commits.slice(0, 5).forEach((commit) => {
+        const item = createElement("li", "");
+        const body = createElement("div", "");
+        body.append(
+            createElement("strong", "", commit.message || "Commit message unavailable"),
+            createElement("span", "", `${commit.author || "Unknown author"} · ${formatTimestamp(commit.date)}`)
+        );
+        const url = safeGitHubUrl(commit.htmlUrl);
+        if (url) {
+            const link = createElement("a", "commit-sha-link", commit.shortSha || "Commit");
+            link.href = url;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            item.append(body, link);
+        } else {
+            item.append(body, createElement("span", "commit-sha", commit.shortSha || ""));
+        }
+        list.append(item);
+    });
+    container.append(list);
 }
 
 function safeGitHubUrl(value) {
@@ -582,6 +1294,7 @@ function formatTimestamp(value) {
 
 function createInsightPanel(className, title, description) {
     const panel = createElement("section", `insight-panel ${className}`);
+    panel.id = className.split(/\s+/)[0];
     const heading = createElement("div", "insight-heading");
     heading.append(
         createElement("h3", "", title),
@@ -868,11 +1581,26 @@ function renderDeveloperContributors(
     }
 
     const metrics = createElement("div", "developer-metrics");
+    const contributionTotal = data.totalContributionsReturned ??
+        contributors.reduce(
+            (total, contributor) => total + (Number(contributor.contributions) || 0),
+            0
+        );
+    const contributorCount = data.contributorsReturned ?? data.totalReturned ?? contributors.length;
+    const topShare = data.topContributorShare ??
+        contributors[0]?.contributionShare ?? null;
+    const topFiveShare = data.topFiveContributorShare ??
+        (contributors.length
+            ? contributors.slice(0, 5).reduce(
+                (total, contributor) => total + (Number(contributor.contributionShare) || 0),
+                0
+            )
+            : null);
     [
-        [formatNumber(data.totalContributionsReturned), "returned contributions"],
-        [formatNumber(data.contributorsReturned), "contributors returned"],
-        [data.topContributorShare == null ? "—" : `${data.topContributorShare}%`, "top contributor share"],
-        [data.topFiveContributorShare == null ? "—" : `${data.topFiveContributorShare}%`, "top five share"],
+        [formatNumber(contributionTotal), "returned contributions"],
+        [formatNumber(contributorCount), "contributors returned"],
+        [topShare == null ? "—" : `${Number(topShare).toFixed(1)}%`, "top contributor share"],
+        [topFiveShare == null ? "—" : `${Number(topFiveShare).toFixed(1)}%`, "top five share"],
     ].forEach(([value, label]) => {
         const metric = createElement("div", "developer-metric");
         metric.append(
@@ -1355,91 +2083,7 @@ function renderDeveloperActivity(points, label) {
     return wrapper;
 }
 
-function createDeveloperSkeleton() {
-    const skeleton = createElement("div", "developer-skeleton");
-    skeleton.setAttribute("aria-hidden", "true");
-    for (let index = 0; index < 3; index++) {
-        skeleton.append(createElement("span", ""));
-    }
-    return skeleton;
-}
-
-function loadDeveloperIntelligence(container, repositoryUrl, requestId) {
-    container.replaceChildren();
-    container.setAttribute("aria-busy", "false");
-    const grid = createElement("div", "developer-intelligence-grid");
-    const leaderboard = createElement("section", "developer-card developer-leaderboard-card");
-    const pullRequests = createElement("section", "developer-card");
-    const issues = createElement("section", "developer-card");
-    const profileContainer = createElement("section", "developer-profile-card");
-    const leaderboardBody = createElement("div", "developer-card-body");
-    const pullRequestBody = createElement("div", "developer-card-body");
-    const issueBody = createElement("div", "developer-card-body");
-    profileContainer.setAttribute("aria-live", "polite");
-    leaderboard.append(
-        createElement("h4", "", "Contributor leaderboard"),
-        leaderboardBody
-    );
-    pullRequests.append(
-        createElement("h4", "", "Pull request analytics"),
-        pullRequestBody
-    );
-    issues.append(
-        createElement("h4", "", "Issue analytics"),
-        issueBody
-    );
-    [leaderboardBody, pullRequestBody, issueBody].forEach((body) => {
-        body.setAttribute("aria-busy", "true");
-        body.append(createDeveloperSkeleton());
-    });
-    grid.append(leaderboard, pullRequests, issues);
-    container.append(grid, profileContainer);
-    setInsightMessage(
-        profileContainer,
-        "Select a contributor to inspect their public repository activity."
-    );
-    void loadInsight(
-        leaderboardBody,
-        CONFIG.endpoints.collaboration,
-        repositoryUrl,
-        requestId,
-        (target, data) => renderDeveloperContributors(
-            target,
-            data,
-            repositoryUrl,
-            requestId,
-            profileContainer
-        )
-    );
-    void loadInsight(
-        pullRequestBody,
-        CONFIG.endpoints.pullRequests,
-        repositoryUrl,
-        requestId,
-        (target, data) => renderPullRequestAnalytics(
-            target,
-            data,
-            repositoryUrl,
-            requestId
-        ),
-        { period: "30", page: "1", limit: "100" }
-    );
-    void loadInsight(
-        issueBody,
-        CONFIG.endpoints.issues,
-        repositoryUrl,
-        requestId,
-        (target, data) => renderIssueAnalytics(
-            target,
-            data,
-            repositoryUrl,
-            requestId
-        ),
-        { period: "30", page: "1", limit: "100" }
-    );
-}
-
-function renderCodebase(container, data) {
+function renderCodebase(container, data, mode = "all") {
     container.replaceChildren();
     container.setAttribute("aria-busy", "false");
     if (!data.available) {
@@ -1452,6 +2096,7 @@ function renderCodebase(container, data) {
 
     const composition = data.composition || {};
     const summary = createElement("div", "codebase-summary");
+    summary.dataset.workspaceSection = "all";
     [
         [formatNumber(data.totalTrackedFiles), "tracked files"],
         [formatNumber(data.totalDirectories), "directories"],
@@ -1491,6 +2136,8 @@ function renderCodebase(container, data) {
     }
 
     const breakdowns = createElement("div", "codebase-breakdowns");
+    breakdowns.id = "codebase-composition";
+    breakdowns.dataset.workspaceSection = "code-composition";
     breakdowns.append(
         renderTypeBreakdown("File categories", composition.categories || []),
         renderTypeBreakdown("File extensions", composition.extensions || [])
@@ -1503,6 +2150,8 @@ function renderCodebase(container, data) {
     container.append(breakdowns);
 
     const directoryPanel = createElement("section", "codebase-subsection");
+    directoryPanel.id = "codebase-directories";
+    directoryPanel.dataset.workspaceSection = "directory-analysis";
     directoryPanel.append(
         createElement("h4", "", "Directory size distribution"),
         createElement(
@@ -1548,11 +2197,9 @@ function renderCodebase(container, data) {
                 )
             );
             row.addEventListener("click", () => {
-                const selector = container.querySelector("#codebase-directory-select");
-                if (selector) {
-                    selector.value = directory.path === "(root)" ? "" : directory.path;
-                    selector.dispatchEvent(new Event("change"));
-                }
+                applicationState.pendingDirectory =
+                    directory.path === "(root)" ? "" : directory.path;
+                navigateWorkspace("code-explorer");
             });
             directoryChart.append(row);
         });
@@ -1563,6 +2210,8 @@ function renderCodebase(container, data) {
     container.append(directoryPanel);
 
     const explorer = createElement("section", "codebase-subsection");
+    explorer.id = "codebase-explorer";
+    explorer.dataset.workspaceSection = "code-explorer";
     explorer.append(
         createElement("h4", "", "File explorer"),
         createElement(
@@ -1582,19 +2231,34 @@ function renderCodebase(container, data) {
         .sort((a, b) => String(a.path).localeCompare(String(b.path)))
         .forEach((entry) => select.append(new Option(entry.path, entry.path)));
     selectLabel.append(select);
+    if (applicationState.pendingDirectory !== null) {
+        select.value = applicationState.pendingDirectory;
+        applicationState.pendingDirectory = null;
+    }
+    const filterLabel = createElement("label", "codebase-select-label", "Filter current folder");
+    const filterInput = createElement("input", "codebase-file-filter");
+    filterInput.type = "search";
+    filterInput.placeholder = "Search files and folders";
+    filterInput.setAttribute("aria-label", "Filter files and folders in the selected directory");
+    filterLabel.append(filterInput);
     const contents = createElement("div", "codebase-file-list");
     const renderContents = () => {
         contents.replaceChildren();
         const directory = select.value;
+        const filter = filterInput.value.trim().toLocaleLowerCase();
         const children = entries.filter((entry) => {
+            let isChild;
             if (directory === "") {
-                return !entry.path.includes("/") ||
+                isChild = !entry.path.includes("/") ||
                     (entry.type === "directory" && !entry.path.includes("/"));
+            } else {
+                const prefix = `${directory}/`;
+                if (!entry.path.startsWith(prefix)) return false;
+                const remainder = entry.path.slice(prefix.length);
+                isChild = remainder.length > 0 && !remainder.includes("/");
             }
-            const prefix = `${directory}/`;
-            if (!entry.path.startsWith(prefix)) return false;
-            const remainder = entry.path.slice(prefix.length);
-            return remainder.length > 0 && !remainder.includes("/");
+            return isChild && (!filter || entry.name.toLocaleLowerCase().includes(filter)
+                || entry.path.toLocaleLowerCase().includes(filter));
         });
         children.sort((a, b) =>
             (a.type === b.type ? 0 : a.type === "directory" ? -1 : 1) ||
@@ -1605,7 +2269,9 @@ function renderCodebase(container, data) {
             contents.append(createElement(
                 "p",
                 "insight-message",
-                "No child entries are available in this folder."
+                filter
+                    ? "No entries match this filter."
+                    : "No child entries are available in this folder."
             ));
             return;
         }
@@ -1627,15 +2293,9 @@ function renderCodebase(container, data) {
                     });
                     row.append(button, createElement("span", "codebase-entry-meta", "Folder"));
                 } else {
-                    const link = createElement("a", "codebase-file-link", entry.name);
-                    const href = safeGitHubUrl(entry.htmlUrl);
-                    if (href) {
-                        link.href = href;
-                        link.target = "_blank";
-                        link.rel = "noopener noreferrer";
-                    } else {
-                        link.removeAttribute("href");
-                    }
+                    const link = createElement("button", "codebase-file-link", entry.name);
+                    link.type = "button";
+                    link.addEventListener("click", () => openFileViewer(entry));
                     row.append(
                         link,
                         createElement(
@@ -1665,11 +2325,14 @@ function renderCodebase(container, data) {
         appendVisible();
     };
     select.addEventListener("change", renderContents);
+    filterInput.addEventListener("input", renderContents);
     renderContents();
-    explorer.append(selectLabel, contents);
+    explorer.append(selectLabel, filterLabel, contents);
     container.append(explorer);
 
     const largestSection = createElement("section", "codebase-subsection");
+    largestSection.id = "codebase-largest-files";
+    largestSection.dataset.workspaceSection = "directory-analysis";
     largestSection.append(
         createElement("h4", "", "Largest files"),
         createElement(
@@ -1689,13 +2352,9 @@ function renderCodebase(container, data) {
         const list = createElement("ol", "largest-file-list");
         largest.forEach((file) => {
             const item = createElement("li", "largest-file-item");
-            const link = createElement("a", "largest-file-link", file.path || file.name);
-            const href = safeGitHubUrl(file.htmlUrl);
-            if (href) {
-                link.href = href;
-                link.target = "_blank";
-                link.rel = "noopener noreferrer";
-            }
+            const link = createElement("button", "largest-file-link", file.path || file.name);
+            link.type = "button";
+            link.addEventListener("click", () => openFileViewer(file));
             item.append(
                 link,
                 createElement("span", "largest-file-type", file.extension || "[no extension]"),
@@ -1711,6 +2370,7 @@ function renderCodebase(container, data) {
 
     const hotspots = Array.isArray(data.hotspots) ? data.hotspots : [];
     const hotspotSection = createElement("section", "codebase-subsection");
+    hotspotSection.dataset.workspaceSection = "directory-analysis";
     hotspotSection.append(
         createElement("h4", "", "Structural observations"),
         createElement(
@@ -1745,6 +2405,238 @@ function renderCodebase(container, data) {
         "insight-limitation",
         data.limitations || "Repository structure data may be incomplete."
     ));
+    if (mode !== "all") {
+        Array.from(container.children).forEach((child) => {
+            const section = child.dataset.workspaceSection;
+            if (section && section !== "all" && section !== mode) child.remove();
+        });
+    }
+}
+
+function openFileViewer(file) {
+    applicationState.selectedFile = {
+        path: file.path,
+        name: file.name || file.path.split("/").at(-1),
+        htmlUrl: file.htmlUrl,
+        sizeBytes: file.sizeBytes,
+    };
+    navigateWorkspace("code-viewer");
+}
+
+function renderSelectedFile() {
+    const file = applicationState.selectedFile;
+    if (!file) return;
+
+    const navigation = createElement("div", "file-viewer-navigation");
+    const back = createElement("button", "button-secondary", "Back to explorer");
+    back.type = "button";
+    back.addEventListener("click", () => navigateWorkspace("code-explorer"));
+    const breadcrumb = createElement("nav", "file-breadcrumb", "");
+    breadcrumb.setAttribute("aria-label", "File path");
+    const crumbParts = file.path.split("/");
+    crumbParts.forEach((part, index) => {
+        if (index > 0) breadcrumb.append(createElement("span", "breadcrumb-separator", "/"));
+        breadcrumb.append(createElement(
+            index === crumbParts.length - 1 ? "strong" : "span",
+            "",
+            part
+        ));
+    });
+    navigation.append(back, breadcrumb);
+
+    const header = createElement("div", "file-viewer-header");
+    const details = createElement("div", "file-viewer-details");
+    details.append(
+        createElement("h2", "", file.name),
+        createElement("span", "file-viewer-meta", "Loading file metadata…")
+    );
+    const actions = createElement("div", "file-viewer-actions");
+    const openOnGitHubUrl = safeGitHubUrl(file.htmlUrl);
+    if (openOnGitHubUrl) {
+        const external = createElement("a", "button-secondary", "Open on GitHub");
+        external.href = openOnGitHubUrl;
+        external.target = "_blank";
+        external.rel = "noopener noreferrer";
+        actions.append(external);
+    }
+    header.append(details, actions);
+
+    const content = createElement("div", "file-viewer-content");
+    content.setAttribute("aria-busy", "true");
+    content.setAttribute("aria-live", "polite");
+    content.append(createElement("p", "insight-loading", "Loading source file…"));
+    elements.workspacePage.append(navigation, header, content);
+    void loadSelectedFile(file, details, actions, content);
+}
+
+async function loadSelectedFile(file, details, actions, content) {
+    const requestId = ++applicationState.fileRequestId;
+    content.setAttribute("aria-busy", "true");
+    content.replaceChildren(createElement("p", "insight-loading", "Loading source file…"));
+    details.querySelector(".file-viewer-meta").textContent = "Loading file metadata…";
+    const query = new URLSearchParams({
+        url: applicationState.repositoryUrl,
+        path: file.path,
+    });
+    const reference = applicationState.repository?.defaultBranch;
+    if (reference) query.set("ref", reference);
+
+    try {
+        const { response, data } = await apiRequest(
+            `${CONFIG.endpoints.file}?${query}`,
+            { method: "GET" }
+        );
+        if (requestId !== applicationState.fileRequestId
+                || applicationState.activeWorkspace !== "code-viewer") return;
+        if (handleAuthenticationExpired(response)) return;
+        if (!response.ok) {
+            throw new Error(data.error || "Unable to load this file.");
+        }
+        renderFileContent(data, details, actions, content);
+    } catch (error) {
+        if (requestId !== applicationState.fileRequestId) return;
+        console.error("File viewer request failed:", error);
+        content.replaceChildren();
+        content.setAttribute("aria-busy", "false");
+        const message = createElement(
+            "p",
+            "insight-message error",
+            error.message || "Unable to load this file."
+        );
+        const retry = createElement("button", "button-secondary", "Retry");
+        retry.type = "button";
+        retry.addEventListener("click", () => loadSelectedFile(file, details, actions, content));
+        content.append(message, retry);
+        details.querySelector(".file-viewer-meta").textContent = "File unavailable";
+    }
+}
+
+function renderFileContent(file, details, actions, container) {
+    details.querySelector(".file-viewer-meta").textContent =
+        `${file.language || "Plain text"} · ${formatBytes(file.sizeBytes)} · ${file.encoding || "Unknown encoding"}`;
+    container.replaceChildren();
+    container.setAttribute("aria-busy", "false");
+    if (file.binary) {
+        container.append(createElement(
+            "p",
+            "insight-message",
+            "This file contains binary data and is not displayed as text."
+        ));
+        return;
+    }
+
+    const content = typeof file.content === "string" ? file.content : "";
+    const copyStatus = createElement("span", "file-action-status");
+    copyStatus.setAttribute("role", "status");
+    const copy = createElement("button", "button-secondary", "Copy");
+    copy.type = "button";
+    copy.addEventListener("click", async () => {
+        try {
+            await navigator.clipboard.writeText(content);
+            copyStatus.textContent = "Copied to clipboard.";
+        } catch (error) {
+            console.error("Unable to copy source file:", error);
+            copyStatus.textContent = "Clipboard access is unavailable.";
+        }
+    });
+    const download = createElement("a", "button-secondary", "Download");
+    if (applicationState.fileObjectUrl) {
+        URL.revokeObjectURL(applicationState.fileObjectUrl);
+    }
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    applicationState.fileObjectUrl = URL.createObjectURL(blob);
+    download.href = applicationState.fileObjectUrl;
+    download.download = file.name;
+    actions.prepend(copy, download, copyStatus);
+
+    if (content.length === 0) {
+        container.append(createElement("p", "insight-message", "This file is empty."));
+    } else if (!supportsSyntaxHighlighting(file.language)) {
+        container.append(createElement(
+            "p",
+            "code-viewer-note",
+            "No syntax highlighter is available for this file type. The text is displayed safely as plain text."
+        ));
+    } else if (content.length > 300000) {
+        container.append(createElement(
+            "p",
+            "code-viewer-note",
+            "Syntax highlighting is disabled for this large file to keep the viewer responsive. The complete text remains available."
+        ));
+    }
+
+    const lines = content.split("\n");
+    const codePanel = createElement("div", "code-panel");
+    const lineNumbers = createElement("pre", "code-line-numbers");
+    lineNumbers.setAttribute("aria-hidden", "true");
+    lineNumbers.textContent = lines.map((_, index) => index + 1).join("\n");
+    const source = createElement("pre", "code-source");
+    const code = createElement("code", "language-source");
+    if (supportsSyntaxHighlighting(file.language) && content.length <= 300000) {
+        appendHighlightedSource(code, content, file.language);
+    } else {
+        code.textContent = content;
+    }
+    source.append(code);
+    codePanel.append(lineNumbers, source);
+    container.append(codePanel);
+}
+
+function appendHighlightedSource(code, source, language) {
+    const keywordSets = {
+        JavaScript: "async await break case catch class const continue debugger default delete do else export extends finally for from function if import in instanceof let new of return static super switch this throw try typeof var void while yield",
+        TypeScript: "abstract any as async await break case catch class const continue declare default delete do else enum export extends finally for from function if implements import in infer instanceof interface is keyof let module namespace never new number object of private protected public readonly return static string super switch this throw type typeof undefined unique unknown var void while yield",
+        Java: "abstract assert boolean break byte case catch char class const continue default do double else enum extends final finally float for if implements import instanceof int interface long native new package private protected public return short static strictfp super switch synchronized this throw throws transient try void volatile while",
+        Python: "and as assert async await break class continue def del elif else except False finally for from global if import in is lambda None nonlocal not or pass raise return True try while with yield",
+        SQL: "alter and as begin by case commit create delete drop else end from group having in insert into join on order select set table union update values where",
+        Shell: "case do done elif else esac fi for function if in select then until while",
+        CSS: "important inherit initial unset var",
+    };
+    if (!keywordSets[language]) {
+        code.textContent = source;
+        return;
+    }
+    const keywords = keywordSets[language]
+        .split(/\s+/)
+        .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        .join("|");
+    const tokens = [];
+    if (["JavaScript", "TypeScript", "Java", "C", "C++", "C#", "Go", "Rust", "CSS"].includes(language)) {
+        tokens.push("\\/\\*[^]*?\\*\\/", "\\/\\/[^\\n]*");
+    }
+    if (["Python", "Shell", "Ruby", "R", "Perl", "YAML"].includes(language)) {
+        tokens.push("#[^\\n]*");
+    }
+    tokens.push(
+        "\"(?:\\\\.|[^\"\\\\])*\"",
+        "'(?:\\\\.|[^'\\\\])*'",
+        "`(?:\\\\.|[^`\\\\])*`",
+        `\\b(?:${keywords})\\b`,
+        "\\b\\d+(?:\\.\\d+)?\\b"
+    );
+    const pattern = new RegExp(tokens.join("|"), "g");
+    let offset = 0;
+    for (const match of source.matchAll(pattern)) {
+        const index = match.index;
+        if (index > offset) code.append(document.createTextNode(source.slice(offset, index)));
+        const token = match[0];
+        const className = token.startsWith("//")
+                || token.startsWith("/*") || token.startsWith("#")
+            ? "syntax-comment"
+            : token.startsWith("\"") || token.startsWith("'") || token.startsWith("`")
+                ? "syntax-string"
+                : /^\d/.test(token)
+                    ? "syntax-number"
+                    : "syntax-keyword";
+        code.append(createElement("span", className, token));
+        offset = index + token.length;
+    }
+    if (offset < source.length) code.append(document.createTextNode(source.slice(offset)));
+}
+
+function supportsSyntaxHighlighting(language) {
+    return ["JavaScript", "TypeScript", "Java", "Python", "SQL", "Shell", "CSS"]
+        .includes(language);
 }
 
 function renderTypeBreakdown(title, values) {
@@ -1780,19 +2672,13 @@ async function requestInsight(endpoint, repositoryUrl, requestId, parameters = {
         url: repositoryUrl,
         ...parameters,
     });
-    const response = await fetch(`${endpoint}?${query}`, {
-        method: "GET",
-        credentials: "same-origin",
-        headers: { Accept: "application/json" },
-    });
-    const data = await readJson(response);
+    const { response, data } = await apiRequest(
+        `${endpoint}?${query}`,
+        { method: "GET" }
+    );
     if (requestId !== analysisRequestId) return null;
 
-    if (response.status === 401) {
-        analysisRequestId += 1;
-        showLogin("Your session has expired. Please sign in again.");
-        return null;
-    }
+    if (handleAuthenticationExpired(response)) return null;
     if (!response.ok) {
         throw new Error(data.error || "Unable to load repository insights.");
     }
@@ -1823,151 +2709,7 @@ async function loadCommitPage(panel, repositoryUrl, page, requestId) {
     );
 }
 
-function loadRepositoryInsights(resultSection, repositoryUrl, requestId) {
-    const insights = createElement("section", "repository-insights");
-    const header = createElement("div", "insights-section-heading");
-    header.append(
-        createElement("span", "section-label", "REPOSITORY INSIGHTS"),
-        createElement("p", "", "Signals and activity sourced from GitHub.")
-    );
-    const health = createInsightPanel(
-        "health-panel",
-        "Repository health",
-        "An explainable RepoLens estimate"
-    );
-    const activity = createInsightPanel(
-        "activity-panel",
-        "Commit activity",
-        "Weekly commits across the last 30 days"
-    );
-    const commits = createInsightPanel(
-        "commits-panel",
-        "Recent commits",
-        "Latest changes from the default repository history"
-    );
-    const developers = createInsightPanel(
-        "developer-intelligence-panel",
-        "Developer intelligence",
-        "Contributor activity, pull requests, issues, and evidence-based collaboration signals"
-    );
-    const codebase = createInsightPanel(
-        "codebase-panel",
-        "Code intelligence",
-        "Repository files, composition, directories, largest files, and structural observations"
-    );
-    insights.append(
-        header,
-        codebase.panel,
-        developers.panel,
-        health.panel,
-        activity.panel,
-        commits.panel
-    );
-    resultSection.append(insights);
-
-    void loadInsight(
-        codebase.body,
-        CONFIG.endpoints.codebase,
-        repositoryUrl,
-        requestId,
-        renderCodebase,
-        { limit: "10" }
-    );
-    loadDeveloperIntelligence(developers.body, repositoryUrl, requestId);
-    void loadInsight(
-        health.body,
-        CONFIG.endpoints.health,
-        repositoryUrl,
-        requestId,
-        renderHealth
-    );
-    void loadInsight(
-        activity.body,
-        CONFIG.endpoints.activity,
-        repositoryUrl,
-        requestId,
-        renderActivity
-    );
-    void loadCommitPage(commits.body, repositoryUrl, 1, requestId);
-}
-
-
-/* 09. Language analytics — API
-   --------------------------------------------------------- */
-
-async function loadLanguageAnalytics(repositoryUrl, requestId) {
-    const resultSection = document.getElementById("repository-result");
-
-    if (!resultSection) return;
-
-    // Remove analytics from the previous repository.
-    document.getElementById("language-analytics")?.remove();
-
-    const section = createElement("section", "language-analytics");
-    section.id = "language-analytics";
-
-    const heading = createElement("div", "analytics-heading");
-
-    heading.append(
-        createElement("h3", "", "Language Analytics"),
-        createElement(
-            "p",
-            "",
-            "Code composition and language distribution"
-        )
-    );
-
-    const loading = createElement(
-        "div",
-        "language-loading",
-        "Loading language statistics..."
-    );
-
-    section.append(heading, loading);
-    resultSection.append(section);
-
-    try {
-        const response = await fetch(
-            `${CONFIG.endpoints.languages}?url=${encodeURIComponent(repositoryUrl)}`,
-            {
-                method: "GET",
-                credentials: "same-origin",
-                headers: {
-                    Accept: "application/json",
-                },
-            }
-        );
-
-        const data = await readJson(response);
-
-        if (requestId !== analysisRequestId) return;
-
-        if (response.status === 401) {
-            analysisRequestId += 1;
-            showLogin("Your session has expired. Please sign in again.");
-            return;
-        }
-
-        if (!response.ok) {
-            throw new Error(
-                data.error || "Unable to load language analytics."
-            );
-        }
-
-        renderLanguageAnalytics(section, data);
-
-    } catch (error) {
-        if (requestId !== analysisRequestId) return;
-        console.error("Language analytics error:", error);
-
-        loading.className = "language-error";
-        loading.textContent =
-            error.message || "Unable to load language analytics.";
-    }
-}
-
-
-/* 10. Language analytics — rendering
+/* Language analytics rendering
    --------------------------------------------------------- */
 
 function renderLanguageAnalytics(container, data) {
@@ -2146,6 +2888,11 @@ function setAnalyzing(isAnalyzing) {
     elements.analyzeButton.disabled = isAnalyzing;
     elements.repoInput.disabled = isAnalyzing;
     elements.clearButton.disabled = isAnalyzing;
+    if (isAnalyzing && !applicationState.repository) {
+        elements.workspaceWelcome.hidden = true;
+    } else if (!isAnalyzing && !applicationState.repository) {
+        elements.workspaceWelcome.hidden = false;
+    }
 
     const buttonText = elements.analyzeButton.querySelector(".button-text");
 
@@ -2162,26 +2909,14 @@ function setAnalyzing(isAnalyzing) {
 }
 
 async function analyzeRepository(repositoryUrl, requestId) {
-    const response = await fetch(
+    const { response, data } = await apiRequest(
         `${CONFIG.endpoints.repository}?url=${encodeURIComponent(repositoryUrl)}`,
-        {
-            method: "GET",
-            credentials: "same-origin",
-            headers: {
-                Accept: "application/json",
-            },
-        }
+        { method: "GET" }
     );
-
-    const data = await readJson(response);
 
     if (requestId !== analysisRequestId) return;
 
-    if (response.status === 401) {
-        analysisRequestId += 1;
-        showLogin("Your session has expired. Please sign in again.");
-        return;
-    }
+    if (handleAuthenticationExpired(response)) return;
 
     if (!response.ok) {
         showMessage(
@@ -2192,13 +2927,11 @@ async function analyzeRepository(repositoryUrl, requestId) {
         return;
     }
 
+    applicationState.repositoryUrl = repositoryUrl;
+    applicationState.workspaceData.clear();
+    applicationState.codebaseData = null;
     showRepositoryResult(data);
-    const resultSection = document.getElementById("repository-result");
-    if (resultSection) {
-        loadRepositoryInsights(resultSection, repositoryUrl, requestId);
-    }
-
-    void loadLanguageAnalytics(repositoryUrl, requestId);
+    navigateWorkspace("dashboard", false);
 }
 
 async function handleRepositorySubmit(event) {
@@ -2294,6 +3027,13 @@ function initializeSearchControls() {
 
 function initializeAuthenticationControls() {
     elements.logoutButton.addEventListener("click", logout);
+    initializeNavigationControls();
+    document.querySelectorAll("[data-github-login]").forEach((link) => {
+        link.addEventListener("click", () => {
+            link.setAttribute("aria-busy", "true");
+            showLoginMessage("Connecting to GitHub...");
+        });
+    });
 }
 
 
@@ -2325,6 +3065,11 @@ async function initializeApp() {
     }
 
     const authenticated = await checkAuthentication();
+
+    if (authenticated) {
+        const requestedWorkspace = window.location.hash.slice(1) || "dashboard";
+        navigateWorkspace(requestedWorkspace, false);
+    }
 
     if (!authenticated && authMessage) {
         showLogin(authMessage);

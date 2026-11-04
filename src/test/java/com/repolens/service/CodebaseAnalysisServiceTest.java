@@ -2,6 +2,7 @@ package com.repolens.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -11,6 +12,8 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.repolens.client.GitHubApiClient;
 import com.repolens.client.GitHubApiException;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -163,6 +166,86 @@ class CodebaseAnalysisServiceTest {
                 .anyMatch(hotspot -> hotspot.category().equals("Deep nesting")));
     }
 
+    @Test
+    void loadsUtf8FileContentWithValidatedPathAndDefaultBranch() {
+        github.file = file("src/App.java", "public class App {}\n");
+
+        var result = service.getFile(
+                REPOSITORY_URL,
+                "src/App.java",
+                null,
+                "test-token"
+        );
+
+        assertEquals("src/App.java", result.path());
+        assertEquals("App.java", result.name());
+        assertEquals("Java", result.language());
+        assertEquals("UTF-8", result.encoding());
+        assertEquals("public class App {}\n", result.content());
+        assertFalse(result.binary());
+        assertEquals("main", github.fileReference);
+        assertEquals("src/App.java", github.filePath);
+        assertEquals("test-token", github.fileToken);
+    }
+
+    @Test
+    void identifiesBinaryContentWithoutReturningItAsText() {
+        byte[] binaryBytes = {0, 1, 2, 3};
+        github.file = file("assets/data.bin", binaryBytes);
+
+        var result = service.getFile(
+                REPOSITORY_URL,
+                "assets/data.bin",
+                "main",
+                "test-token"
+        );
+
+        assertTrue(result.binary());
+        assertEquals("binary", result.encoding());
+        assertNull(result.content());
+    }
+
+    @Test
+    void rejectsPathTraversalInvalidReferencesAndOversizedFiles() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> service.getFile(REPOSITORY_URL, "../secret", "main", "token")
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> service.getFile(REPOSITORY_URL, "src/./App.java", "main", "token")
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> service.getFile(REPOSITORY_URL, "src/App.java", "feature/../main", "token")
+        );
+
+        ObjectNode oversized = mapper.createObjectNode()
+                .put("type", "file")
+                .put("size", 1024L * 1024 + 1)
+                .put("encoding", "base64")
+                .put("content", "");
+        github.file = oversized;
+        assertThrows(
+                CodebaseAnalysisService.FileTooLargeException.class,
+                () -> service.getFile(REPOSITORY_URL, "large.dat", "main", "token")
+        );
+        assertEquals(1, github.fileRequests);
+    }
+
+    private ObjectNode file(String path, String content) {
+        return file(path, content.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private ObjectNode file(String path, byte[] content) {
+        return mapper.createObjectNode()
+                .put("type", "file")
+                .put("path", path)
+                .put("size", content.length)
+                .put("encoding", "base64")
+                .put("content", Base64.getEncoder().encodeToString(content));
+    }
+
     private JsonNode repository(String branch) {
         ObjectNode node = mapper.createObjectNode();
         node.put("id", 1);
@@ -193,8 +276,13 @@ class CodebaseAnalysisServiceTest {
     private static final class FakeGitHubApiClient extends GitHubApiClient {
         private JsonNode repository;
         private JsonNode tree;
+        private JsonNode file;
         private GitHubApiException treeFailure;
         private int treeRequests;
+        private int fileRequests;
+        private String filePath;
+        private String fileReference;
+        private String fileToken;
 
         @Override
         public JsonNode getRepository(String owner, String name, String token) {
@@ -211,6 +299,21 @@ class CodebaseAnalysisServiceTest {
             treeRequests++;
             if (treeFailure != null) throw treeFailure;
             return tree;
+        }
+
+        @Override
+        public JsonNode getRepositoryFile(
+                String owner,
+                String name,
+                String path,
+                String reference,
+                String token
+        ) {
+            fileRequests++;
+            filePath = path;
+            fileReference = reference;
+            fileToken = token;
+            return file;
         }
     }
 }
