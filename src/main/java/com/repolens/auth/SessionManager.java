@@ -2,6 +2,9 @@
 package com.repolens.auth;
 
 import java.security.SecureRandom;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -11,9 +14,20 @@ public class SessionManager {
     private static final int SESSION_ID_BYTES = 32;
 
     private final SecureRandom secureRandom = new SecureRandom();
+    private final Clock clock;
+    private final Duration sessionLifetime;
 
-    private final Map<String, GitHubOAuthService.GitHubUser> sessions =
+    private final Map<String, Session> sessions =
             new ConcurrentHashMap<>();
+
+    public SessionManager() {
+        this(Clock.systemUTC(), Duration.ofHours(24));
+    }
+
+    SessionManager(Clock clock, Duration sessionLifetime) {
+        this.clock = clock;
+        this.sessionLifetime = sessionLifetime;
+    }
 
     public String createSession(
             GitHubOAuthService.GitHubUser user
@@ -25,7 +39,10 @@ public class SessionManager {
                 .withoutPadding()
                 .encodeToString(randomBytes);
 
-        sessions.put(sessionId, user);
+        sessions.put(
+                sessionId,
+                new Session(user, clock.instant().plus(sessionLifetime))
+        );
 
         return sessionId;
     }
@@ -35,7 +52,17 @@ public class SessionManager {
             return null;
         }
 
-        return sessions.get(sessionId);
+        Session session = sessions.get(sessionId);
+        if (session == null) {
+            return null;
+        }
+
+        if (!clock.instant().isBefore(session.expiresAt())) {
+            sessions.remove(sessionId, session);
+            return null;
+        }
+
+        return session.user();
     }
 
     public void removeSession(String sessionId) {
@@ -47,4 +74,9 @@ public class SessionManager {
     public boolean isAuthenticated(String sessionId) {
         return getUser(sessionId) != null;
     }
+
+    private record Session(
+            GitHubOAuthService.GitHubUser user,
+            Instant expiresAt
+    ) {}
 }

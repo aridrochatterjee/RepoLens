@@ -105,9 +105,8 @@ public class OAuthController {
             redirect(exchange, "/?auth=success");
 
         } catch (Exception exception) {
-            exception.printStackTrace();
-
-            redirect(exchange, "/?auth=error");
+            System.err.println("GitHub OAuth callback failed.");
+            redirect(exchange, "/?auth=failed");
         }
     }
 
