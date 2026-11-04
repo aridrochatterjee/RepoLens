@@ -127,17 +127,15 @@ img, svg { display: block; }
 }
 
 .brand-icon, .footer-brand-icon {
-  display: grid;
+  display: block;
   width: 31px;
   height: 31px;
-  place-items: center;
   border: 1px solid var(--border-strong);
   border-radius: 8px;
   background: linear-gradient(145deg, #1c2540, var(--surface-raised));
-  color: var(--accent);
+  object-fit: cover;
 }
 
-.brand-icon svg { width: 21px; stroke: currentColor; stroke-width: 1.7; }
 .brand-period { color: var(--accent); }
 .workspace-context { display: flex; min-width: 0; align-items: center; gap: 14px; margin-right: auto; color: var(--muted); }
 .workspace-context span:last-child { overflow: hidden; max-width: 40vw; text-overflow: ellipsis; white-space: nowrap; }
@@ -260,7 +258,7 @@ img, svg { display: block; }
 .product-preview { min-width: 0; }
 .preview-window { overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow); transform: rotate(1deg); }
 .preview-titlebar { display: flex; height: 47px; align-items: center; gap: 11px; padding: 0 15px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 12px; }
-.preview-brand-mark { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 7px; background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.preview-brand-mark { display: block; width: 24px; height: 24px; border-radius: 7px; object-fit: cover; }
 .preview-status { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: var(--green); font-size: 10px; }
 .preview-status span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .preview-body { display: grid; min-height: 315px; grid-template-columns: 58px minmax(0, 1fr); }
@@ -643,7 +641,7 @@ body.navigation-locked { overflow: hidden; }
 .workspace-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 22px; padding: 17px 28px; border-top: 1px solid var(--border); color: var(--subtle); font-size: 11px; }
 .workspace-footer p { margin: 0; }
 .footer-brand { font-size: 13px; }
-.footer-brand-icon { width: 23px; height: 23px; font-size: 11px; }
+.footer-brand-icon { width: 23px; height: 23px; }
 .copyright { margin-left: auto; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
 

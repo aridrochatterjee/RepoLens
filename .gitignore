@@ -15,6 +15,10 @@ hs_err_pid*
 replay_pid*
 javac.*.args
 
+.codex/
+.aws/
+.agents/
+
 # Keep the Gradle wrapper JAR tracked
 !gradle/wrapper/gradle-wrapper.jar
 
