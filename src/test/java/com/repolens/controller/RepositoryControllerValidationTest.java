@@ -45,6 +45,15 @@ class RepositoryControllerValidationTest {
     }
 
     @Test
+    void acceptsFiftyTwoWeekActivityAndRejectsUnsupportedPeriods() {
+        assertEquals(364, controller.parsePeriod("364"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> controller.parsePeriod("366")
+        );
+    }
+
+    @Test
     void mapsGitHubRateLimitsAndProcessingResponsesSafely() {
         assertEquals(
                 403,

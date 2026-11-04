@@ -2,25 +2,29 @@
 
 RepoLens is a Java 21 and vanilla JavaScript application for exploring GitHub repository metadata, source structure, and development activity. It uses the JDK `HttpServer` and `HttpClient`, Jackson, Gradle, and GitHub REST API; no web framework or frontend framework is required.
 
-## RepoLens 2.0 frontend
+## RepoLens 2.2 frontend — Dark Observatory
 
-The frontend is a dark-first, GitHub-inspired workspace for repository insights, code intelligence, and developer intelligence. The redesign retains the static HTML/CSS/vanilla JavaScript architecture and existing API contracts.
+The frontend is a dark-first Developer Observatory for repository insights, code intelligence, and developer intelligence. It retains the static HTML/CSS/vanilla JavaScript architecture and existing API contracts.
 
-- **Design system:** `frontend/css/style.css` defines shared color, typography, spacing, border, surface, elevation, transition, and layout tokens. Components use the same tokens in dark and light themes.
+- **Design system:** Observatory surface, typography, status, chart, focus, spacing, and motion tokens live in `frontend/css/style.css`; dark mode is the signature experience and light mode remains supported.
+- **Tailwind build:** `tailwind.config.js` defines the Observatory palette and typography extensions. `frontend/css/tailwind.css` is compiled to the committed `frontend/css/tailwind.generated.css`, which is loaded before the component stylesheet. Tailwind is a build-time frontend dependency only—there is no Node server or frontend framework.
 - **Frontend structure:** `frontend/index.html` contains the signed-out product landing page and authenticated workspace shell. `frontend/js/app.js` handles authentication state, repository analysis, safe DOM rendering, and navigation.
-- **Navigation:** The signed-in shell has independent Dashboard, Repository Insights, Code Explorer, Code Composition, Directory Analysis, Contributors, Pull Requests, Issues, Collaboration, and Settings workspaces. Analytics load when a workspace is opened instead of being displayed together.
-- **Dashboard:** A concise repository header, three summary metrics, recent commits, activity trend, and language distribution. Detailed analytics live in their own workspaces.
+- **Navigation:** The signed-in shell has independent Dashboard, Repository Insights, Commit Analytics, Code Explorer, Code Composition, Directory Analysis, Contributors, Pull Requests, Issues, Collaboration, and Settings workspaces. Analytics load when a workspace is opened instead of being displayed together.
+- **Dashboard:** A concise repository header, health/activity/contributor/PR/issue/language summary metrics, recent commits, activity trend, and language distribution. Bounded GitHub counts are identified as returned-page samples; detailed analytics live in their own workspaces.
 - **Source viewer:** Files open inside RepoLens with path metadata, safe text rendering, line numbers, lightweight syntax highlighting, copy/download actions, and a secondary GitHub link. Binary files are identified and are not returned as text.
 - **Theme:** The theme toggle switches between dark and light CSS custom-property sets. The preference is stored locally as a presentation setting; authentication tokens are never stored in browser storage.
 - **Responsive and accessible behavior:** The sidebar becomes a keyboard-operable mobile drawer, workspaces and code panels reflow for narrow screens, focus indicators remain visible, charts expose text descriptions, and motion is reduced when requested by the operating system.
-- **Dependencies:** No frontend packages, build system, or framework were added. The existing server continues to serve the static files at their existing paths.
+- **Dependencies:** Tailwind CSS, PostCSS, and Autoprefixer are development-only CSS build dependencies. The existing Java server continues to serve static files at their existing paths.
 
 Run the frontend syntax check and backend tests with:
 
 ```sh
+npm run build:css
 node --check frontend/js/app.js
 ./gradlew clean test
 ```
+
+During frontend work, `npm run watch:css` continuously rebuilds the production stylesheet. Before committing, use `npm run build:css`; it minifies the generated CSS used by the application.
 
 ## Features
 
@@ -51,8 +55,8 @@ Repository analytics routes require the RepoLens session cookie and accept only 
 | `GET /api/repository` | `url` (required) | Repository metadata |
 | `GET /api/repository/languages` | `url` (required) | Language byte counts and percentages |
 | `GET /api/repository/health` | `url` (required) | Explainable health estimate |
-| `GET /api/repository/activity` | `url` (required), `period` (7, 30, or 90; default 30) | Daily and weekly commit activity |
-| `GET /api/repository/commits` | `url` (required), `page` (1–100; default 1), `limit` (1–30; default 10) | Recent commits, latest first |
+| `GET /api/repository/activity` | `url` (required), `period` (7, 30, 90, or 364; default 30) | Daily and weekly commit activity; GitHub returns Sunday-aligned weekly buckets, so a 364-day selection can have a shorter returned date range |
+| `GET /api/repository/commits` | `url` (required), `page` (1–100; default 1), `limit` (1–30; default 10), `author`, `since`, `until` (optional) | Recent commits, latest first, with optional GitHub author and inclusive ISO date filters |
 | `GET /api/repository/contributors` | `url` (required) | Contributions and relative distribution |
 | `GET /api/repository/contributors/{username}` | `url` (required), `limit` (1–30; default 10) | Public contributor profile, latest matching commits, and repository-scoped search counts |
 | `GET /api/repository/pull-requests` | `url` (required), `period` (7, 30, or 90; default 30), `page` (1–10; default 1), `limit` (1–100; default 100) | Recently updated PRs up to the requested result limit per page, merge and review observations |
@@ -96,15 +100,21 @@ Example activity response:
   "dailyActivity": [{"date": "2026-10-06", "commits": 2}],
   "weeklyActivity": [{"weekStarting": "2026-10-05", "commits": 4}],
   "available": true,
-  "unavailableReason": null
+  "unavailableReason": null,
+  "availabilityState": "available",
+  "coverageNote": null
 }
 ```
 
-If GitHub is still calculating statistics, activity is returned with `available: false`, null totals, and an explanation. The UI displays an unavailable state instead of a zero-valued chart.
+`availabilityState` distinguishes `available`, `incomplete`, `calculating`, and `absent`. Incomplete results include only dates present in GitHub's weekly response; missing dates are not filled with zeroes, and `coverageNote` describes the returned range. GitHub may return `202` while asynchronously calculating statistics or `204` when it has no response body. The UI presents these states explicitly and never turns them into zero activity.
 
-Commit responses contain `repositoryFullName`, `page`, `limit`, and a `commits` array. Entries include `sha`, `shortSha`, `message`, nullable author avatar, author name, date, and GitHub commit URL. Contributor responses include `repositoryFullName`, `totalReturned`, `available`, `mayBeTruncated`, `contributors`, and a `limitation` explanation. Each contributor includes nullable profile fields, contribution count, and percentage share of contributions returned.
+Commit responses contain `repositoryFullName`, `page`, `limit`, and a `commits` array. Entries include `sha`, `shortSha`, `message`, nullable author avatar, author name, date, and GitHub commit URL. Contributor responses include `repositoryFullName`, `totalReturned` (all returned GitHub records), `totalContributionsReturned`, `anonymousContributions`, `available`, `availabilityState`, `mayBeTruncated`, `contributors` (named accounts only), and a `limitation` explanation. RepoLens requests anonymous contributor records explicitly. A missing, null, or unavailable GitHub author is never assigned a username or included in the leaderboard. Its count remains in the repository-wide total and `anonymousContributions`. Named-account shares use all returned contributions, including anonymous records, as their denominator; shares are unavailable when the bounded result set may be incomplete.
 
 The codebase response includes availability, branch, truncation flags, summary totals, composition counts, a bounded `treeEntries` list, directory aggregates, ranked largest files, structural observations, and limitations. A missing default branch or unavailable tree returns `available: false`. A valid empty tree returns `available: true` with zero counts. GitHub's `truncated` flag is retained, and all derived totals are explicitly partial in that case. Explorer output is capped at 3,000 entries, directory results at 2,000, and largest-file results at the validated `limit` (maximum 30).
+
+The commit API validates GitHub usernames and ISO calendar dates, converts inclusive date ranges to UTC timestamps, and uses GitHub's bounded per-page commit endpoint. The commit-analytics workspace uses the repository statistics endpoint for the repository-wide 52-week daily heatmap and derives monthly and weekday summaries only from returned daily counts. Incomplete calendar coverage is retained and labeled; absent dates are never synthesized as zeroes. Individual heatmaps use at most the 100 latest matching commits and are explicitly marked as samples; dates without returned commits in a capped sample remain unknown.
+
+The directory-analysis workspace includes a drill-down treemap built only from reported GitHub blob sizes. Entries with unknown or zero sizes are excluded from area calculations and identified separately; truncated tree results are labeled partial. Clicking a file opens the authenticated in-app Source Viewer. File size and directory structure are signals for exploration, not proof of quality or technical debt.
 
 The file endpoint validates repository URLs, rejects absolute paths, backslashes, empty path components, and `.` / `..` traversal segments, and validates branch/commit references before requesting GitHub. It uses the existing server-side OAuth token and never accepts a token parameter. Text files are strictly decoded as UTF-8; invalid UTF-8 or NUL-containing files are reported as binary with `content: null`. The default maximum file size is 1 MiB and can be set with `-Drepolens.maxFileBytes=<bytes>` (1 byte–10 MiB). Files over the configured limit receive HTTP `413`. GitHub requests use the existing 20-second timeout, and redirect destinations are restricted to `api.github.com`. File API errors include a stable error code for missing files, permission failures, rate limits, timeouts, and unsupported content.
 
@@ -112,7 +122,7 @@ If the viewer reports that the file endpoint is unavailable, restart RepoLens wi
 
 ## Developer intelligence methodology and limitations
 
-- **Contributor leaderboard and concentration:** GitHub's Contributors API is read in at most five pages of 100 results (500 contributors). Duplicate named accounts are removed case-insensitively; GitHub's anonymous contributor entries cannot be reliably deduplicated without an identity. Ranks sort by returned contribution count. Percentages divide by the sum of those returned counts and are explicitly a subset share, not a measure of developer effort. Bot accounts are marked using GitHub's public account type or `[bot]` login suffix. GitHub may omit anonymous users and returns commit-based contribution counts, not all forms of work. Recent-activity ordering is not offered because the leaderboard endpoint does not provide comparable per-contributor timestamps.
+- **Contributor leaderboard and concentration:** GitHub's Contributors API is read with anonymous records enabled and in at most five pages of 100 results (500 records). Duplicate named accounts are removed case-insensitively; anonymous records are retained separately because they cannot be reliably deduplicated without an identity. Anonymous counts remain in the returned contribution total but never receive fabricated usernames or leaderboard ranks. Named-account shares divide by all returned contributions, including anonymous contributions, and are omitted when the bounded results may be incomplete. Shares describe returned data, not effort or productivity. Bot accounts are marked using GitHub's public account type or `[bot]` login suffix. GitHub returns commit-based contribution counts, not all forms of work, and may provide records without an account identity. Recent-activity ordering is not offered because the leaderboard endpoint does not provide comparable per-contributor timestamps.
 - **Contributor profiles:** The profile endpoint requests up to 30 commits filtered by GitHub author, one public GitHub user record, up to 500 repository contributor records for a matching contribution count, and three bounded GitHub search counts for authored PRs, authored issues, and PR reviews. GitHub Search is indexed and caps result sets at 1,000; its counts may therefore be incomplete. Commit charts and first/most-recent observed dates represent only the latest returned commits. A missing account or field is shown as unavailable, not inferred as zero. Only public profile fields and repository activity are returned; no productivity or personal-characteristic score is calculated.
 - **Pull requests:** Analytics use the requested result limit (1–100, default 100) per page, with pages bounded to 1–10. `merged_at` identifies merged PRs; closed includes merged PRs, and merge rate is `merged / returned closed × 100` (unavailable when no returned PRs are closed). Average time-to-merge is the mean of non-negative intervals for returned PRs with valid `created_at` and `merged_at`. The selected 7-, 30-, or 90-day window applies to the created-date activity chart; the aggregate status sample remains the page of recently updated records. Drafts remain in the returned PR population and are reported separately. Review-comment totals come from GitHub's PR list; unique reviewers are sampled from at most five PR review lists. The response identifies these scopes and limitations.
 - **Issues:** Analytics use the requested result limit (1–100, default 100) recently updated entries per page, with pages bounded to 1–10. Because the Issues API also returns PRs, any entry containing `pull_request` is removed before issue counts, labels, activity, and resolution-time calculations. Resolution time uses only valid `created_at` / `closed_at` pairs. Issue trends and recent lists use the selected date window, while open/closed totals and label counts describe the returned page only.

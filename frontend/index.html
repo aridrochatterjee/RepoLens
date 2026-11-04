@@ -7,8 +7,9 @@
     name="description"
     content="Explore repository health, code structure, developer activity and collaboration with RepoLens."
   />
-  <meta name="theme-color" content="#0d1117" />
-  <title>RepoLens — Repository intelligence</title>
+  <meta name="theme-color" content="#090B12" />
+  <title>RepoLens — The Developer's Observatory</title>
+  <link rel="stylesheet" href="/css/tailwind.generated.css" />
   <link rel="stylesheet" href="/css/style.css" />
   <script src="/js/app.js" defer></script>
 </head>
@@ -105,12 +106,12 @@
         <div class="landing-copy">
           <div class="eyebrow">
             <span class="eyebrow-indicator" aria-hidden="true"></span>
-            A clearer view of your software
+            DEVELOPER OBSERVATORY · GITHUB DATA
           </div>
-          <h1>Understand your codebase <span>beyond the commits.</span></h1>
+          <h1>Your codebase has a <span>universe of insights.</span></h1>
           <p>
-            Explore repository health, code structure, developer activity and
-            collaboration — all in one workspace.
+            Explore repository structure, observe development activity and uncover
+            insights hidden inside your GitHub projects.
           </p>
           <a href="/auth/github/login" class="github-login-button" data-github-login>
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -126,8 +127,8 @@
           <div class="preview-window">
             <div class="preview-titlebar">
               <span class="preview-brand-mark" aria-hidden="true">R</span>
-              <span>Repository workspace</span>
-              <span class="preview-status"><span aria-hidden="true"></span> GitHub data</span>
+              <span>Observatory / Repository field</span>
+              <span class="preview-status"><span aria-hidden="true"></span> Live signal</span>
             </div>
             <div class="preview-body">
               <div class="preview-sidebar" aria-hidden="true">
@@ -136,30 +137,30 @@
               <div class="preview-panels">
                 <div class="preview-panel preview-panel-wide">
                   <span class="preview-kicker">REPOSITORY INSIGHTS</span>
-                  <strong>Signals, not guesswork.</strong>
+                  <strong>Observe the signal. Follow the evidence.</strong>
                   <span class="preview-line preview-line-long"></span>
                   <span class="preview-line"></span>
                 </div>
                 <div class="preview-panel">
                   <span class="preview-kicker">CODE INTELLIGENCE</span>
-                  <strong>See how the project is structured.</strong>
+                  <strong>Map the architecture beneath the surface.</strong>
                 </div>
                 <div class="preview-panel">
                   <span class="preview-kicker">DEVELOPER INTELLIGENCE</span>
-                  <strong>Understand activity and collaboration.</strong>
+                  <strong>Trace the motion of the team.</strong>
                 </div>
               </div>
             </div>
           </div>
-          <p class="preview-caption">A focused workspace for the details behind a repository.</p>
+          <p class="preview-caption">A precision instrument for repository investigation.</p>
         </div>
       </section>
 
       <section id="feature-suite" class="landing-features">
         <div class="section-heading">
-          <span class="section-label">THE REPOSITORY, IN CONTEXT</span>
-          <h2>From project shape to team activity.</h2>
-          <p>One place to explore the information GitHub already makes available.</p>
+          <span class="section-label">INSTRUMENTS FOR INVESTIGATION</span>
+          <h2>Structure, activity, and collaboration in one field of view.</h2>
+          <p>Every view is grounded in returned GitHub data and its known limits.</p>
         </div>
         <div class="features">
           <article class="feature-card">
@@ -189,7 +190,7 @@
       <section id="how-it-works" class="landing-method">
         <div>
           <span class="section-label">BUILT AROUND REAL DATA</span>
-          <h2>Connect a repository. Follow the evidence.</h2>
+          <h2>Bring your repository into focus.</h2>
           <p>
             RepoLens reads repository information through GitHub's API. Estimates
             and samples are labeled with their scope; missing data stays unavailable
@@ -231,6 +232,10 @@
               <a class="nav-item" href="#insights" data-workspace="insights" title="Repository insights">
                 <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v17H6.5A2.5 2.5 0 0 1 4 17.5zM4 17.5A2.5 2.5 0 0 1 6.5 15H20" /><path d="M8 7h8M8 10h6" /></svg>
                 <span>Repository insights</span>
+              </a>
+              <a class="nav-item" href="#commit-analytics" data-workspace="commit-analytics" title="Commit analytics">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 19V5m0 14h16" /><path d="m7 15 3-4 3 2 5-7" /></svg>
+                <span>Commit analytics</span>
               </a>
             </div>
             <div class="nav-group">

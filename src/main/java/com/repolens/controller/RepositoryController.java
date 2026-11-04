@@ -335,7 +335,10 @@ public class RepositoryController {
                             requiredParameter(query, "url"),
                             user.accessToken(),
                             pagination.page(),
-                            pagination.limit()
+                            pagination.limit(),
+                            query.get("author"),
+                            query.get("since"),
+                            query.get("until")
                     );
                 }
         );
@@ -505,17 +508,17 @@ public class RepositoryController {
         return value;
     }
 
-    private int parsePeriod(String value) {
+    int parsePeriod(String value) {
         try {
             int period = Integer.parseInt(value);
-            if (period == 7 || period == 30 || period == 90) {
+            if (period == 7 || period == 30 || period == 90 || period == 364) {
                 return period;
             }
         } catch (NumberFormatException ignored) {
             // Report one consistent validation error below.
         }
         throw new IllegalArgumentException(
-                "Period must be 7, 30, or 90 days."
+                "Period must be 7, 30, 90, or 364 days."
         );
     }
 
@@ -603,7 +606,9 @@ public class RepositoryController {
         } else {
             allowed = switch (path) {
                 case "/api/repository/activity" -> Set.of("url", "period");
-                case "/api/repository/commits" -> Set.of("url", "page", "limit");
+                case "/api/repository/commits" -> Set.of(
+                        "url", "page", "limit", "author", "since", "until"
+                );
                 case "/api/repository/codebase" -> Set.of("url", "limit");
                 case "/api/repository/file" -> Set.of("url", "path", "ref");
                 case "/api/repository/pull-requests",

@@ -7,6 +7,7 @@ public record CollaborationInsights(
         boolean available,
         int contributorsReturned,
         long totalContributionsReturned,
+        Long anonymousContributions,
         Double topContributorShare,
         Double topFiveContributorShare,
         int namedContributors,

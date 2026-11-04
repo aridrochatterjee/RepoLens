@@ -184,11 +184,44 @@ class DeveloperIntelligenceServiceTest {
 
         assertEquals(3, analytics.contributorsReturned());
         assertEquals(20, analytics.totalContributionsReturned());
+        assertEquals(0L, analytics.anonymousContributions());
         assertEquals(60.0, analytics.topContributorShare(), 0.01);
         assertEquals(100.0, analytics.topFiveContributorShare(), 0.01);
         assertEquals(3, analytics.namedContributors());
         assertEquals(1, analytics.botContributors());
         assertTrue(analytics.contributors().get(1).bot());
+    }
+
+    @Test
+    void includesAnonymousContributionsInNamedContributorShareDenominator() {
+        ArrayNode contributors = mapper.createArrayNode();
+        contributor(contributors, "octocat", 8, "User");
+        contributors.addObject().put("contributions", 12).putNull("author");
+        github.contributors = contributors;
+
+        var analytics = service.analyzeCollaboration(REPOSITORY_URL, "token");
+
+        assertEquals(1, analytics.contributors().size());
+        assertEquals("octocat", analytics.contributors().getFirst().login());
+        assertEquals(20, analytics.totalContributionsReturned());
+        assertEquals(12L, analytics.anonymousContributions());
+        assertEquals(40.0, analytics.topContributorShare(), 0.01);
+    }
+
+    @Test
+    void hidesContributionSharesWhenContributorPaginationIsIncomplete() {
+        ArrayNode contributors = mapper.createArrayNode();
+        for (int index = 0; index < 100; index++) {
+            contributor(contributors, "octocat", 8, "User");
+        }
+        github.contributors = contributors;
+        github.contributorsRepeatPages = true;
+
+        var analytics = service.analyzeCollaboration(REPOSITORY_URL, "token");
+
+        assertNull(analytics.topContributorShare());
+        assertNull(analytics.topFiveContributorShare());
+        assertTrue(analytics.limitation().contains("500 contributors"));
     }
 
     @Test
@@ -361,6 +394,7 @@ class DeveloperIntelligenceServiceTest {
         private JsonNode profile;
         private GitHubApiException pullRequestFailure;
         private GitHubApiException contributorsFailure;
+        private boolean contributorsRepeatPages;
         private GitHubApiException searchFailure;
         private String searchFailureQualifier;
         private int commitRequests;
@@ -379,7 +413,8 @@ class DeveloperIntelligenceServiceTest {
                 int limit
         ) {
             if (contributorsFailure != null) throw contributorsFailure;
-            return page == 1 ? contributors : mapper.createArrayNode();
+            return page == 1 || contributorsRepeatPages
+                    ? contributors : mapper.createArrayNode();
         }
 
         @Override

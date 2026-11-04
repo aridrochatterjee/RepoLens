@@ -14,8 +14,6 @@ import com.repolens.client.GitHubApiException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -55,6 +53,33 @@ class RepositoryInsightsServiceTest {
     }
 
     @Test
+    void preservesReturned52WeekActivityWhenTheCalendarWindowStartsEarlier() {
+        github.activity = activityResponse(364, 1);
+
+        var activity = service.analyzeActivity(
+                REPOSITORY_URL,
+                "test-token",
+                364
+        );
+
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        LocalDate firstReturnedDate = today.minusDays(
+                today.getDayOfWeek().getValue() % 7
+        ).minusWeeks(51);
+        int returnedDays = (int) (today.toEpochDay()
+                - firstReturnedDate.toEpochDay() + 1);
+
+        assertTrue(activity.available());
+        assertEquals(returnedDays, activity.dailyActivity().size());
+        assertEquals(returnedDays, activity.totalCommits());
+        assertEquals("incomplete", activity.availabilityState());
+        assertTrue(activity.coverageNote().contains(
+                returnedDays + " of 364"
+        ));
+        assertTrue(activity.weeklyActivity().size() >= 51);
+    }
+
+    @Test
     void reportsTiedMostActiveDaysWithoutChoosingArbitrarily() {
         github.activity = activityResponse(7, 1);
 
@@ -81,6 +106,7 @@ class RepositoryInsightsServiceTest {
         );
 
         assertFalse(activity.available());
+        assertEquals("calculating", activity.availabilityState());
         assertNull(activity.totalCommits());
         assertNull(activity.averageCommitsPerWeek());
         assertTrue(activity.dailyActivity().isEmpty());
@@ -98,7 +124,26 @@ class RepositoryInsightsServiceTest {
 
         assertFalse(activity.available());
         assertNull(activity.totalCommits());
-        assertTrue(activity.unavailableReason().contains("no usable"));
+        assertEquals("absent", activity.availabilityState());
+        assertTrue(activity.unavailableReason().contains("empty activity series"));
+    }
+
+    @Test
+    void treatsNoContentActivityResponseAsAbsentRatherThanRequestFailure() {
+        github.activityFailure = new GitHubApiException(
+                "GitHub returned no content for this analytics request.",
+                204
+        );
+
+        var activity = service.analyzeActivity(
+                REPOSITORY_URL,
+                "test-token",
+                30
+        );
+
+        assertFalse(activity.available());
+        assertEquals("absent", activity.availabilityState());
+        assertTrue(activity.unavailableReason().contains("no activity content"));
     }
 
     @Test
@@ -110,7 +155,7 @@ class RepositoryInsightsServiceTest {
 
         var health = service.analyzeHealth(REPOSITORY_URL, "test-token");
 
-        assertEquals(70, health.score());
+        assertEquals(60, health.score());
         assertEquals(40, health.availableWeight());
         assertNull(health.factors().get(0).score());
         assertNull(health.factors().get(2).score());
@@ -144,6 +189,19 @@ class RepositoryInsightsServiceTest {
     }
 
     @Test
+    void doesNotScoreAnonymousContributionRecordsAsNamedContributorDiversity() {
+        ArrayNode records = mapper.createArrayNode();
+        records.addObject().put("contributions", 21).putNull("author");
+        github.contributors = records;
+
+        var health = service.analyzeHealth(REPOSITORY_URL, "test-token");
+
+        assertNull(health.factors().get(3).score());
+        assertTrue(health.factors().get(3).explanation()
+                .contains("without account identities"));
+    }
+
+    @Test
     void mapsCommitFieldsAndUsesCommitAuthorWhenGitHubUserIsMissing() {
         var commits = service.analyzeCommits(
                 REPOSITORY_URL,
@@ -163,6 +221,65 @@ class RepositoryInsightsServiceTest {
     }
 
     @Test
+    void appliesValidatedAuthorAndInclusiveDateFiltersToCommitRequests() {
+        service.analyzeCommits(
+                REPOSITORY_URL,
+                "test-token",
+                2,
+                30,
+                "octocat",
+                "2026-03-01",
+                "2026-03-07"
+        );
+
+        assertEquals("octocat", github.commitAuthor);
+        assertEquals("2026-03-01T00:00:00Z", github.commitSince);
+        assertEquals("2026-03-07T23:59:59.999999999Z", github.commitUntil);
+        assertEquals(2, github.commitPage);
+        assertEquals(30, github.commitLimit);
+    }
+
+    @Test
+    void rejectsInvalidCommitFiltersBeforeCallingGitHub() {
+        org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> service.analyzeCommits(
+                        REPOSITORY_URL,
+                        "test-token",
+                        1,
+                        30,
+                        "bad/name",
+                        null,
+                        null
+                )
+        );
+        org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> service.analyzeCommits(
+                        REPOSITORY_URL,
+                        "test-token",
+                        1,
+                        30,
+                        null,
+                        "2026-03-08",
+                        "2026-03-07"
+                )
+        );
+        assertEquals(0, github.commitRequests);
+    }
+
+    @Test
+    void acceptsNewGitHubRepositoryMetadataFields() {
+        var repository = service.analyzeRepository(
+                REPOSITORY_URL,
+                "test-token"
+        );
+
+        assertEquals("octocat/Hello-World", repository.fullName());
+        assertTrue(repository.pushedAt() != null);
+    }
+
+    @Test
     void sortsContributorsAndHandlesDeletedAccounts() {
         var contributors = service.analyzeContributors(
                 REPOSITORY_URL,
@@ -173,8 +290,71 @@ class RepositoryInsightsServiceTest {
         assertEquals(2, contributors.totalReturned());
         assertEquals("octocat", contributors.contributors().get(0).login());
         assertEquals(8, contributors.contributors().get(0).contributions());
-        assertNull(contributors.contributors().get(1).login());
-        assertEquals(20.0, contributors.contributors().get(1).contributionShare());
+        assertEquals(10L, contributors.totalContributionsReturned());
+        assertEquals(2L, contributors.anonymousContributions());
+        assertEquals(80.0, contributors.contributors().getFirst().contributionShare());
+    }
+
+    @Test
+    void separatesAnonymousRowsAndUsesAllReturnedContributionsAsShareDenominator() {
+        ArrayNode records = mapper.createArrayNode();
+        records.addObject().put("contributions", 8).putObject("author")
+                .put("login", "octocat")
+                .put("avatar_url", "https://avatars.githubusercontent.com/u/1")
+                .put("html_url", "https://github.com/octocat");
+        records.addObject().put("contributions", 2).putNull("author");
+        records.addObject().put("contributions", 3).putObject("author");
+        records.addObject().put("contributions", 7).putObject("author")
+                .putNull("login");
+        records.addObject().put("contributions", 5).putObject("author")
+                .put("login", "   ");
+        github.contributors = records;
+
+        var contributors = service.analyzeContributors(
+                REPOSITORY_URL,
+                "test-token"
+        );
+
+        assertEquals(1, contributors.contributors().size());
+        assertEquals("octocat", contributors.contributors().getFirst().login());
+        assertEquals(25L, contributors.totalContributionsReturned());
+        assertEquals(17L, contributors.anonymousContributions());
+        assertEquals(32.0, contributors.contributors().getFirst().contributionShare());
+    }
+
+    @Test
+    void explainsWhenGitHubReturnsOnlyAnonymousContributorRecords() {
+        ArrayNode records = mapper.createArrayNode();
+        records.addObject().put("contributions", 21).putNull("author");
+        github.contributors = records;
+
+        var contributors = service.analyzeContributors(
+                REPOSITORY_URL,
+                "test-token"
+        );
+
+        assertTrue(contributors.available());
+        assertTrue(contributors.contributors().isEmpty());
+        assertEquals(21L, contributors.anonymousContributions());
+        assertTrue(contributors.limitation().contains("none contained"));
+        assertEquals("available", contributors.availabilityState());
+    }
+
+    @Test
+    void treatsNoContentContributorResponseAsAbsent() {
+        github.contributorsFailure = new GitHubApiException(
+                "GitHub returned no content for this analytics request.",
+                204
+        );
+
+        var contributors = service.analyzeContributors(
+                REPOSITORY_URL,
+                "test-token"
+        );
+
+        assertFalse(contributors.available());
+        assertEquals("absent", contributors.availabilityState());
+        assertTrue(contributors.limitation().contains("204 No Content"));
     }
 
     @Test
@@ -199,11 +379,14 @@ class RepositoryInsightsServiceTest {
         assertEquals(1, contributors.contributors().size());
         assertEquals(8, contributors.contributors().getFirst().contributions());
         assertTrue(contributors.mayBeTruncated());
+        assertNull(contributors.contributors().getFirst().contributionShare());
     }
 
     private JsonNode repositoryResponse() {
         ObjectNode repository = mapper.createObjectNode();
         repository.put("id", 1);
+        repository.put("node_id", "R_kgDOExample");
+        repository.put("visibility", "public");
         repository.put("name", "Hello-World");
         repository.put("full_name", "octocat/Hello-World");
         repository.put("pushed_at", Instant.now().toString());
@@ -214,24 +397,27 @@ class RepositoryInsightsServiceTest {
     private JsonNode activityResponse(int periodDays, int commitsPerDay) {
         LocalDate today = LocalDate.now(ZoneOffset.UTC);
         LocalDate firstDay = today.minusDays(periodDays - 1L);
-        Map<LocalDate, int[]> weeks = new LinkedHashMap<>();
-        for (int offset = 0; offset < periodDays; offset++) {
-            LocalDate date = firstDay.plusDays(offset);
-            LocalDate sunday = date.minusDays(
-                    date.getDayOfWeek().getValue() % 7
-            );
-            int[] days = weeks.computeIfAbsent(sunday, ignored -> new int[7]);
-            int dayIndex = (int) (date.toEpochDay() - sunday.toEpochDay());
-            days[dayIndex] = commitsPerDay;
-        }
-
+        LocalDate currentSunday = today.minusDays(
+                today.getDayOfWeek().getValue() % 7
+        );
+        LocalDate firstSunday = currentSunday.minusWeeks(51);
         ArrayNode activity = mapper.createArrayNode();
-        weeks.forEach((sunday, dayCounts) -> {
+        for (int weekIndex = 0; weekIndex < 52; weekIndex++) {
+            LocalDate sunday = firstSunday.plusWeeks(weekIndex);
             ObjectNode week = activity.addObject();
             week.put("week", sunday.atStartOfDay().toEpochSecond(ZoneOffset.UTC));
             ArrayNode days = week.putArray("days");
-            for (int count : dayCounts) days.add(count);
-        });
+            int total = 0;
+            for (int dayIndex = 0; dayIndex < 7; dayIndex++) {
+                LocalDate date = sunday.plusDays(dayIndex);
+                boolean selectedDate = !date.isBefore(firstDay)
+                        && !date.isAfter(today);
+                int count = selectedDate ? commitsPerDay : 0;
+                days.add(count);
+                total += count;
+            }
+            week.put("total", total);
+        }
         return activity;
     }
 
@@ -272,6 +458,12 @@ class RepositoryInsightsServiceTest {
         private JsonNode contributors;
         private GitHubApiException activityFailure;
         private GitHubApiException contributorsFailure;
+        private int commitRequests;
+        private int commitPage;
+        private int commitLimit;
+        private String commitAuthor;
+        private String commitSince;
+        private String commitUntil;
 
         @Override
         public JsonNode getRepository(String owner, String name, String token) {
@@ -296,6 +488,27 @@ class RepositoryInsightsServiceTest {
                 int page,
                 int limit
         ) {
+            commitRequests++;
+            return commits;
+        }
+
+        @Override
+        public JsonNode getRepositoryCommits(
+                String owner,
+                String name,
+                String token,
+                int page,
+                int limit,
+                String author,
+                String since,
+                String until
+        ) {
+            commitRequests++;
+            commitPage = page;
+            commitLimit = limit;
+            commitAuthor = author;
+            commitSince = since;
+            commitUntil = until;
             return commits;
         }
 

@@ -36,6 +36,7 @@ import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
 
 public class RepositoryService {
 
@@ -173,31 +174,40 @@ public class RepositoryService {
                 return unavailableActivity(
                         parsed.owner() + "/" + parsed.repository(),
                         periodDays,
-                        "GitHub is still calculating repository activity. Try again shortly."
+                        "GitHub is still calculating repository activity. Try again shortly.",
+                        "calculating"
+                );
+            }
+            if (exception.getStatusCode() == 204) {
+                return unavailableActivity(
+                        parsed.owner() + "/" + parsed.repository(),
+                        periodDays,
+                        "GitHub returned no activity content. It may have no reportable activity, or GitHub may have no statistics to return.",
+                        "absent"
                 );
             }
             throw exception;
         }
 
-        if (response == null || !response.isArray() || response.isEmpty()) {
+        if (response == null || !response.isArray()) {
             return unavailableActivity(
                     parsed.owner() + "/" + parsed.repository(),
                     periodDays,
-                    "GitHub has no usable commit activity data for this repository."
+                    "GitHub did not return a valid weekly activity series."
+            );
+        }
+        if (response.isEmpty()) {
+            return unavailableActivity(
+                    parsed.owner() + "/" + parsed.repository(),
+                    periodDays,
+                    "GitHub returned an empty activity series. This is not a measured zero-commit period.",
+                    "absent"
             );
         }
 
         LocalDate today = LocalDate.now(ZoneOffset.UTC);
-        LocalDate firstDay = today.minusDays(periodDays - 1L);
-        Map<LocalDate, Integer> dailyCounts = new TreeMap<>();
-        Map<LocalDate, Integer> weeklyCounts = new TreeMap<>();
-        Set<LocalDate> coveredDays = new HashSet<>();
-        for (int day = 0; day < periodDays; day++) {
-            LocalDate date = firstDay.plusDays(day);
-            dailyCounts.put(date, 0);
-            weeklyCounts.put(date.with(DayOfWeek.MONDAY), 0);
-        }
-
+        LocalDate requestedFirstDay = today.minusDays(periodDays - 1L);
+        TreeMap<LocalDate, JsonNode> weeks = new TreeMap<>();
         for (JsonNode week : response) {
             JsonNode weekNode = week.path("week");
             JsonNode days = week.path("days");
@@ -212,38 +222,64 @@ public class RepositoryService {
             LocalDate weekStart = Instant.ofEpochSecond(weekNode.asLong())
                     .atZone(ZoneOffset.UTC)
                     .toLocalDate();
-            int dayCount = Math.min(days.size(), 7);
-            for (int index = 0; index < dayCount; index++) {
-                JsonNode dayNode = days.get(index);
-                if (!dayNode.isNumber() || dayNode.asInt() < 0) {
+            if (weeks.putIfAbsent(weekStart, week) != null) {
+                return unavailableActivity(
+                        parsed.owner() + "/" + parsed.repository(),
+                        periodDays,
+                        "GitHub returned duplicate weekly commit activity data."
+                );
+            }
+            for (JsonNode day : days) {
+                if (!day.isNumber() || day.asInt() < 0) {
                     return unavailableActivity(
                             parsed.owner() + "/" + parsed.repository(),
                             periodDays,
                             "GitHub returned invalid daily commit activity data."
                     );
                 }
+            }
+        }
 
+        LocalDate firstDay = requestedFirstDay;
+        if (periodDays == 364 && weeks.firstKey().isAfter(firstDay)) {
+            firstDay = weeks.firstKey();
+        }
+        Map<LocalDate, Integer> dailyCounts = new TreeMap<>();
+        Map<LocalDate, Integer> weeklyCounts = new TreeMap<>();
+        Set<LocalDate> coveredDays = new HashSet<>();
+        for (var entry : weeks.entrySet()) {
+            LocalDate weekStart = entry.getKey();
+            JsonNode days = entry.getValue().path("days");
+            for (int index = 0; index < days.size(); index++) {
                 LocalDate date = weekStart.plusDays(index);
-                if (dailyCounts.containsKey(date)) {
+                if (!date.isBefore(firstDay) && !date.isAfter(today)) {
                     coveredDays.add(date);
-                    int count = dayNode.asInt();
+                    int count = days.get(index).asInt();
                     dailyCounts.put(date, count);
                     LocalDate monday = date.with(DayOfWeek.MONDAY);
-                    weeklyCounts.computeIfPresent(
-                            monday,
-                            (ignored, current) -> current + count
-                    );
+                    weeklyCounts.merge(monday, count, Integer::sum);
                 }
             }
         }
 
-        if (coveredDays.size() != periodDays) {
+        if (coveredDays.isEmpty()) {
             return unavailableActivity(
                     parsed.owner() + "/" + parsed.repository(),
                     periodDays,
-                    "GitHub did not return activity data for the complete selected period."
+                    "GitHub returned no activity dates within the selected period."
             );
         }
+
+        boolean complete = firstDay.equals(requestedFirstDay)
+                && coveredDays.size() == periodDays;
+        String coverageNote = complete
+                ? null
+                : "GitHub returned activity for " + coveredDays.size() + " of "
+                        + periodDays + " selected days. Charts and totals include "
+                        + "only returned dates; missing dates are not treated as zero."
+                        + (firstDay.isAfter(requestedFirstDay)
+                                ? " Its weekly series begins on " + firstDay + "."
+                                : "");
 
         List<CommitActivityDay> dailyActivity = dailyCounts.entrySet()
                 .stream()
@@ -297,12 +333,14 @@ public class RepositoryService {
                 parsed.owner() + "/" + parsed.repository(),
                 periodDays,
                 total,
-                Math.round(total * 7.0 / periodDays * 100.0) / 100.0,
+                Math.round(total * 7.0 / coveredDays.size() * 100.0) / 100.0,
                 mostActiveDay,
                 dailyActivity,
                 weeklyActivity,
                 true,
-                null
+                null,
+                complete ? "available" : "incomplete",
+                coverageNote
         );
     }
 
@@ -312,13 +350,47 @@ public class RepositoryService {
             int page,
             int limit
     ) {
+        return analyzeCommits(
+                repositoryUrl, accessToken, page, limit, null, null, null
+        );
+    }
+
+    public CommitPage analyzeCommits(
+            String repositoryUrl,
+            String accessToken,
+            int page,
+            int limit,
+            String authorLogin,
+            String since,
+            String until
+    ) {
         var parsed = RepositoryUrlParser.parse(repositoryUrl);
+        if (authorLogin != null && !authorLogin.isBlank()
+                && !authorLogin.matches("[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")) {
+            throw new IllegalArgumentException("Invalid GitHub username.");
+        }
+        LocalDate sinceDate = parseCommitDate(since, "since");
+        LocalDate untilDate = parseCommitDate(until, "until");
+        if (sinceDate != null && untilDate != null
+                && sinceDate.isAfter(untilDate)) {
+            throw new IllegalArgumentException(
+                    "The start date must not be after the end date."
+            );
+        }
+        String sinceTimestamp = sinceDate == null
+                ? null : sinceDate.atStartOfDay(ZoneOffset.UTC).toInstant().toString();
+        String untilTimestamp = untilDate == null
+                ? null : untilDate.plusDays(1).atStartOfDay(ZoneOffset.UTC)
+                        .minusNanos(1).toInstant().toString();
         JsonNode response = githubApiClient.getRepositoryCommits(
                 parsed.owner(),
                 parsed.repository(),
                 accessToken,
                 page,
-                limit
+                limit,
+                authorLogin,
+                sinceTimestamp,
+                untilTimestamp
         );
 
         if (response == null || !response.isArray()) {
@@ -369,6 +441,17 @@ public class RepositoryService {
         );
     }
 
+    private LocalDate parseCommitDate(String date, String parameter) {
+        if (date == null || date.isBlank()) return null;
+        try {
+            return LocalDate.parse(date);
+        } catch (DateTimeParseException exception) {
+            throw new IllegalArgumentException(
+                    parameter + " must be an ISO date (YYYY-MM-DD)."
+            );
+        }
+    }
+
     public ContributorStats analyzeContributors(
             String repositoryUrl,
             String accessToken
@@ -394,10 +477,26 @@ public class RepositoryService {
                     return new ContributorStats(
                             parsed.owner() + "/" + parsed.repository(),
                             null,
+                            null,
+                            null,
                             false,
                             false,
                             List.of(),
-                            "GitHub is still calculating contributor statistics. Try again shortly."
+                            "GitHub is still calculating contributor statistics. Try again shortly.",
+                            "calculating"
+                    );
+                }
+                if (exception.getStatusCode() == 204) {
+                    return new ContributorStats(
+                            parsed.owner() + "/" + parsed.repository(),
+                            null,
+                            null,
+                            null,
+                            false,
+                            false,
+                            List.of(),
+                            "GitHub returned no contributor statistics (204 No Content). The repository may have no contributor activity that GitHub can report.",
+                            "absent"
                     );
                 }
                 throw exception;
@@ -412,6 +511,9 @@ public class RepositoryService {
             for (JsonNode contributor : response) {
                 JsonNode author = contributor.path("author");
                 String login = textOrNull(author.path("login"));
+                if (login != null && login.isBlank()) {
+                    login = null;
+                }
                 String identity = login == null
                         ? author.path("id").isNumber()
                                 ? "id:" + author.path("id").asLong()
@@ -432,20 +534,33 @@ public class RepositoryService {
         long totalContributions = returnedContributors.stream()
                 .mapToLong(item -> nonNegativeInt(item.path("contributions")))
                 .sum();
+        long anonymousContributions = returnedContributors.stream()
+                .filter(item -> {
+                    String login = textOrNull(item.path("author").path("login"));
+                    return login == null || login.isBlank();
+                })
+                .mapToLong(item -> nonNegativeInt(item.path("contributions")))
+                .sum();
+        final boolean contributorResultsTruncated = hasMore;
         List<ContributorStat> contributors = returnedContributors.stream()
                 .map(item -> {
                     JsonNode author = item.path("author");
+                    String login = textOrNull(author.path("login"));
+                    if (login != null && login.isBlank()) {
+                        login = null;
+                    }
                     int contributions = nonNegativeInt(
                             item.path("contributions")
                     );
-                    Double share = totalContributions == 0
+                    Double share = contributorResultsTruncated
+                            || totalContributions == 0
                             ? null
                             : Math.round(
                                     contributions * 10000.0
                                             / totalContributions
                             ) / 100.0;
                     return new ContributorStat(
-                            textOrNull(author.path("login")),
+                            login,
                             textOrNull(author.path("avatar_url")),
                             textOrNull(author.path("html_url")),
                             contributions,
@@ -458,6 +573,7 @@ public class RepositoryService {
                                             .endsWith("[bot]")
                     );
                 })
+                .filter(contributor -> contributor.login() != null)
                 .sorted(Comparator.comparingInt(
                                 ContributorStat::contributions
                         ).reversed()
@@ -469,15 +585,30 @@ public class RepositoryService {
                         ))
                 .toList();
 
+        String limitation;
+        if (hasMore) {
+            limitation = "Showing the first 500 contributors returned by GitHub; "
+                    + "additional contributors may be omitted.";
+        } else if (contributors.isEmpty() && anonymousContributions > 0) {
+            limitation = "GitHub returned " + returnedContributors.size()
+                    + " contributor record(s), but none contained an available "
+                    + "GitHub username. Anonymous contribution counts are retained "
+                    + "and are not attributed to an inferred account.";
+        } else {
+            limitation = "GitHub cannot map every contribution to an account, and "
+                    + "private repository activity is not included.";
+        }
+
         return new ContributorStats(
                 parsed.owner() + "/" + parsed.repository(),
-                contributors.size(),
+                returnedContributors.size(),
+                totalContributions,
+                anonymousContributions,
                 true,
                 hasMore,
                 contributors,
-                hasMore
-                        ? "Showing the first 500 contributors returned by GitHub; additional contributors may be omitted."
-                        : "GitHub contributor data may omit anonymous users and does not include contributions made in private repositories."
+                limitation,
+                "available"
         );
     }
 
@@ -496,12 +627,16 @@ public class RepositoryService {
                 accessToken
         );
 
-        Integer activityScore = activity.available()
+        boolean completeActivity = activity.available()
+                && "available".equals(activity.availabilityState());
+        Integer activityScore = completeActivity
                 ? Math.min(100, activity.totalCommits() * 5)
                 : null;
-        String activityExplanation = activity.available()
+        String activityExplanation = completeActivity
                 ? activity.totalCommits() + " commits in the last 30 days; 20 commits reaches the factor's 100-point cap."
-                : activity.unavailableReason();
+                : activity.unavailableReason() != null
+                        ? activity.unavailableReason()
+                        : activity.coverageNote();
 
         Integer maintenanceScore = maintenanceScore(repository.pushedAt());
         String maintenanceExplanation = maintenanceScore == null
@@ -509,39 +644,42 @@ public class RepositoryService {
                 : "Last push: " + repository.pushedAt()
                         + "; newer activity scores higher, with 100 points for activity within 30 days.";
 
-        Integer issueScore = activity.available()
+        Integer issueScore = completeActivity
                 && repository.openIssues() != null
                 ? issueScore(repository.openIssues(), activity.totalCommits())
                 : null;
         String issueExplanation = issueScore == null
                 ? repository.openIssues() == null
                         ? "GitHub did not provide an open-issues count."
-                        : "Cannot compare open issues with recent commits while activity data is unavailable."
+                        : "Cannot compare open issues with recent commits while activity data is unavailable or incomplete."
                 : repository.openIssues() + " open issues relative to "
                         + activity.totalCommits()
                         + " recent commits; GitHub's open-issues count may include pull requests.";
 
         Integer contributorScore = contributors.available()
-                ? Math.min(100, contributors.totalReturned() * 20)
+                && !contributors.contributors().isEmpty()
+                ? Math.min(100, contributors.contributors().size() * 20)
                 : null;
-        String contributorExplanation = contributors.available()
-                ? contributors.totalReturned()
-                        + " contributors returned; five or more reaches the factor's 100-point cap."
-                : "Contributor activity data is unavailable.";
+        String contributorExplanation = contributorScore != null
+                ? contributors.contributors().size()
+                        + " named contributors returned; five or more reaches the factor's 100-point cap."
+                : contributors.available()
+                        ? "GitHub returned contribution totals without account identities; contributor diversity cannot be scored."
+                        : "Contributor activity data is unavailable.";
 
-        long activeWeeks = activity.available()
+        long activeWeeks = completeActivity
                 ? activity.weeklyActivity().stream()
                         .filter(week -> week.commits() > 0)
                         .count()
                 : 0;
-        Integer consistencyScore = activity.available()
+        Integer consistencyScore = completeActivity
                 ? (int) Math.round(activeWeeks * 100.0
                         / activity.weeklyActivity().size())
                 : null;
-        String consistencyExplanation = activity.available()
+        String consistencyExplanation = completeActivity
                 ? activeWeeks + " of " + activity.weeklyActivity().size()
                         + " calendar weeks had commits in the selected window."
-                : "Recent development consistency cannot be measured because activity data is unavailable.";
+                : "Recent development consistency cannot be measured because activity data is unavailable or incomplete.";
 
         List<HealthScoreFactor> factors = List.of(
                 new HealthScoreFactor(
@@ -614,6 +752,20 @@ public class RepositoryService {
             int periodDays,
             String reason
     ) {
+        return unavailableActivity(
+                repositoryFullName,
+                periodDays,
+                reason,
+                "incomplete"
+        );
+    }
+
+    private RepositoryActivity unavailableActivity(
+            String repositoryFullName,
+            int periodDays,
+            String reason,
+            String availabilityState
+    ) {
         return new RepositoryActivity(
                 repositoryFullName,
                 periodDays,
@@ -623,7 +775,9 @@ public class RepositoryService {
                 List.of(),
                 List.of(),
                 false,
-                reason
+                reason,
+                availabilityState,
+                null
         );
     }
 

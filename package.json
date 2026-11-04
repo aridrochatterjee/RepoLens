@@ -1,0 +1,27 @@
+{
+  "name": "repolens",
+  "version": "1.0.0",
+  "description": "RepoLens is a Java 21 and vanilla JavaScript application for exploring GitHub repository metadata, source structure, and development activity. It uses the JDK `HttpServer` and `HttpClient`, Jackson, Gradle, and GitHub REST API; no web framework or frontend framework is required.",
+  "main": "index.js",
+  "scripts": {
+    "build:css": "tailwindcss -i frontend/css/tailwind.css -o frontend/css/tailwind.generated.css --minify",
+    "watch:css": "tailwindcss -i frontend/css/tailwind.css -o frontend/css/tailwind.generated.css --watch",
+    "check:frontend": "node --check frontend/js/app.js && npm run build:css"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aridrochatterjee/RepoLens.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/aridrochatterjee/RepoLens/issues"
+  },
+  "homepage": "https://github.com/aridrochatterjee/RepoLens#readme",
+  "devDependencies": {
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.17"
+  }
+}

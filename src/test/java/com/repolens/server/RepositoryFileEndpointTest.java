@@ -161,6 +161,27 @@ class RepositoryFileEndpointTest {
         );
     }
 
+    @Test
+    void appliesCommitAuthorAndDateFiltersThroughTheExistingRoute()
+            throws Exception {
+        HttpResponse<String> response = request(
+                "/api/repository/commits?url=" + encode(REPOSITORY_URL)
+                        + "&author=octocat&since=2026-03-01&until=2026-03-07"
+                        + "&page=2&limit=30",
+                true
+        );
+
+        assertEquals(200, response.statusCode());
+        assertEquals(
+                "octocat",
+                mapper.readTree(response.body()).path("commits")
+                        .get(0).path("author").asText()
+        );
+        assertEquals("octocat", github.commitAuthor);
+        assertEquals("2026-03-01T00:00:00Z", github.commitSince);
+        assertEquals("2026-03-07T23:59:59.999999999Z", github.commitUntil);
+    }
+
     private HttpResponse<String> request(String path, boolean authenticated)
             throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder()
@@ -186,6 +207,9 @@ class RepositoryFileEndpointTest {
         private int fileRequests;
         private String reference;
         private String accessToken;
+        private String commitAuthor;
+        private String commitSince;
+        private String commitUntil;
 
         @Override
         public JsonNode getRepository(String owner, String name, String token) {
@@ -205,6 +229,33 @@ class RepositoryFileEndpointTest {
             accessToken = token;
             if (failure != null) throw failure;
             return file;
+        }
+
+        @Override
+        public JsonNode getRepositoryCommits(
+                String owner,
+                String name,
+                String token,
+                int page,
+                int limit,
+                String author,
+                String since,
+                String until
+        ) {
+            commitAuthor = author;
+            commitSince = since;
+            commitUntil = until;
+            var commits = new ObjectMapper().createArrayNode();
+            var item = commits.addObject()
+                    .put("sha", "commit-sha")
+                    .put("html_url", "https://github.com/octocat/Hello-World/commit/commit-sha");
+            item.putObject("commit")
+                    .put("message", "Filtered commit")
+                    .putObject("author")
+                    .put("date", "2026-03-03T12:00:00Z")
+                    .put("name", "Octocat");
+            item.putObject("author").put("login", author);
+            return commits;
         }
     }
 }

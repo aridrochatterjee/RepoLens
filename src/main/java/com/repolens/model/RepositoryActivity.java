@@ -11,5 +11,7 @@ public record RepositoryActivity(
         List<CommitActivityDay> dailyActivity,
         List<CommitActivityWeek> weeklyActivity,
         boolean available,
-        String unavailableReason
+        String unavailableReason,
+        String availabilityState,
+        String coverageNote
 ) {}

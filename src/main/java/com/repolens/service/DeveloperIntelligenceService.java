@@ -448,16 +448,18 @@ public class DeveloperIntelligenceService {
                 accessToken
         );
         List<ContributorStat> contributors = stats.contributors();
-        long total = contributors.stream()
-                .mapToLong(ContributorStat::contributions).sum();
+        long total = stats.totalContributionsReturned() == null
+                ? 0 : stats.totalContributionsReturned();
         int named = (int) contributors.stream()
                 .filter(item -> item.login() != null)
                 .count();
         int bots = (int) contributors.stream()
                 .filter(ContributorStat::bot)
                 .count();
-        Double topShare = shareOf(contributors, total, 1);
-        Double topFiveShare = shareOf(contributors, total, 5);
+        Double topShare = stats.mayBeTruncated()
+                ? null : shareOf(contributors, total, 1);
+        Double topFiveShare = stats.mayBeTruncated()
+                ? null : shareOf(contributors, total, 5);
         List<CollaborationInsights.Observation> observations =
                 new ArrayList<>();
         if (topShare != null && topShare >= 50) {
@@ -485,7 +487,9 @@ public class DeveloperIntelligenceService {
                 stats.available(),
                 stats.totalReturned() == null ? contributors.size()
                         : stats.totalReturned(),
-                total,
+                stats.totalContributionsReturned() == null
+                        ? 0 : stats.totalContributionsReturned(),
+                stats.anonymousContributions(),
                 topShare,
                 topFiveShare,
                 named,
