@@ -1,0 +1,941 @@
+
+"use strict";
+
+/* =========================================================
+   RepoLens — Frontend Application
+   Authentication, repository analysis and language insights
+   ========================================================= */
+
+
+/* 01. DOM references
+   --------------------------------------------------------- */
+
+const elements = {
+    themeToggle: document.getElementById("theme-toggle"),
+    themeColorMeta: document.querySelector('meta[name="theme-color"]'),
+
+    loginView: document.getElementById("login-view"),
+    dashboardView: document.getElementById("dashboard-view"),
+    footerView: document.getElementById("footer-view"),
+
+    userProfile: document.getElementById("user-profile"),
+    userAvatar: document.getElementById("user-avatar"),
+    userName: document.getElementById("user-name"),
+    logoutButton: document.getElementById("logout-button"),
+    loginMessage: document.getElementById("login-message"),
+
+    repoForm: document.getElementById("repo-form"),
+    repoInput: document.getElementById("repo-url"),
+    analyzeButton: document.getElementById("analyze-button"),
+    clearButton: document.getElementById("clear-button"),
+
+    message: document.getElementById("message"),
+};
+
+
+/* 02. Configuration
+   --------------------------------------------------------- */
+
+const CONFIG = {
+    themeStorageKey: "repolens-theme",
+
+    endpoints: {
+        currentUser: "/api/auth/me",
+        logout: "/api/auth/logout",
+        repository: "/api/repository",
+        languages: "/api/repository/languages",
+    },
+
+    languageColors: {
+        JavaScript: "#f1e05a",
+        TypeScript: "#3178c6",
+        Java: "#b07219",
+        Python: "#3572A5",
+        Rust: "#dea584",
+        Go: "#00ADD8",
+        HTML: "#e34c26",
+        CSS: "#563d7c",
+        Shell: "#89e051",
+        C: "#555555",
+        "C++": "#f34b7d",
+        "C#": "#178600",
+        PHP: "#4F5D95",
+        Ruby: "#701516",
+        Kotlin: "#A97BFF",
+        Swift: "#F05138",
+        Dart: "#00B4AB",
+        Vue: "#41b883",
+        Svelte: "#ff3e00",
+    },
+
+    fallbackLanguageColors: [
+        "#9b7aff",
+        "#60a5fa",
+        "#4ade80",
+        "#f59e0b",
+        "#f472b6",
+        "#22d3ee",
+        "#a78bfa",
+    ],
+};
+
+
+/* 03. Shared utilities
+   --------------------------------------------------------- */
+
+async function readJson(response) {
+    try {
+        return await response.json();
+    } catch {
+        return {};
+    }
+}
+
+function createElement(tag, className, text) {
+    const element = document.createElement(tag);
+
+    if (className) {
+        element.className = className;
+    }
+
+    if (text !== undefined && text !== null) {
+        element.textContent = String(text);
+    }
+
+    return element;
+}
+
+function formatNumber(value) {
+    const number = Number(value);
+
+    if (!Number.isFinite(number)) {
+        return "0";
+    }
+
+    return number.toLocaleString();
+}
+
+function formatBytes(bytes) {
+    const value = Number(bytes);
+
+    if (!Number.isFinite(value) || value <= 0) {
+        return "0 B";
+    }
+
+    if (value < 1024) {
+        return `${value} B`;
+    }
+
+    if (value < 1024 * 1024) {
+        return `${(value / 1024).toFixed(1)} KB`;
+    }
+
+    if (value < 1024 * 1024 * 1024) {
+        return `${(value / (1024 * 1024)).toFixed(2)} MB`;
+    }
+
+    return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function getLanguageColor(language, index = 0) {
+    return (
+        CONFIG.languageColors[language] ||
+        CONFIG.fallbackLanguageColors[
+            index % CONFIG.fallbackLanguageColors.length
+        ]
+    );
+}
+
+
+/* 04. Theme management
+   --------------------------------------------------------- */
+
+function getSavedTheme() {
+    try {
+        const saved = localStorage.getItem(CONFIG.themeStorageKey);
+
+        if (saved === "dark" || saved === "light") {
+            return saved;
+        }
+    } catch (error) {
+        console.warn("Unable to read theme preference.", error);
+    }
+
+    return "dark";
+}
+
+function applyTheme(theme) {
+    const selected = theme === "light" ? "light" : "dark";
+    const isLight = selected === "light";
+
+    document.documentElement.setAttribute("data-theme", selected);
+
+    if (elements.themeToggle) {
+        elements.themeToggle.setAttribute(
+            "aria-pressed",
+            String(isLight)
+        );
+
+        elements.themeToggle.setAttribute(
+            "aria-label",
+            isLight ? "Switch to dark theme" : "Switch to light theme"
+        );
+    }
+
+    if (elements.themeColorMeta) {
+        elements.themeColorMeta.setAttribute(
+            "content",
+            isLight ? "#faf9fc" : "#0d0c10"
+        );
+    }
+
+    try {
+        localStorage.setItem(CONFIG.themeStorageKey, selected);
+    } catch (error) {
+        console.warn("Unable to save theme preference.", error);
+    }
+}
+
+function initializeTheme() {
+    applyTheme(getSavedTheme());
+
+    elements.themeToggle?.addEventListener("click", () => {
+        const current = document.documentElement.getAttribute("data-theme");
+
+        applyTheme(current === "dark" ? "light" : "dark");
+    });
+}
+
+
+/* 05. Message handling
+   --------------------------------------------------------- */
+
+function showMessage(text, type = "info") {
+    if (!elements.message) return;
+
+    elements.message.textContent = text;
+    elements.message.className = `message visible ${type}`;
+}
+
+function clearMessage() {
+    if (!elements.message) return;
+
+    elements.message.textContent = "";
+    elements.message.className = "message";
+}
+
+function showLoginMessage(text = "") {
+    if (elements.loginMessage) {
+        elements.loginMessage.textContent = text;
+    }
+}
+
+
+/* 06. Authentication
+   --------------------------------------------------------- */
+
+function showLogin(messageText = "") {
+    elements.loginView.hidden = false;
+    elements.dashboardView.hidden = true;
+    elements.footerView.hidden = true;
+    elements.userProfile.hidden = true;
+
+    showLoginMessage(messageText);
+}
+
+function showDashboard(user) {
+    elements.loginView.hidden = true;
+    elements.dashboardView.hidden = false;
+    elements.footerView.hidden = false;
+    elements.userProfile.hidden = false;
+
+    elements.userName.textContent = user.name || user.username || "GitHub user";
+
+    if (user.avatarUrl) {
+        elements.userAvatar.src = user.avatarUrl;
+        elements.userAvatar.hidden = false;
+    } else {
+        elements.userAvatar.removeAttribute("src");
+        elements.userAvatar.hidden = true;
+    }
+
+    elements.userAvatar.alt = user.username
+        ? `${user.username}'s GitHub avatar`
+        : "GitHub profile avatar";
+
+    showLoginMessage("");
+}
+
+async function checkAuthentication() {
+    try {
+        const response = await fetch(CONFIG.endpoints.currentUser, {
+            method: "GET",
+            credentials: "same-origin",
+            headers: {
+                Accept: "application/json",
+            },
+        });
+
+        if (!response.ok) {
+            showLogin();
+            return false;
+        }
+
+        const user = await readJson(response);
+
+        // The API should return profile fields at the top level.
+        if (!user || (!user.username && !user.name)) {
+            showLogin();
+            return false;
+        }
+
+        showDashboard(user);
+        return true;
+
+    } catch (error) {
+        console.error("Authentication check failed:", error);
+
+        showLogin("Unable to connect to RepoLens. Please refresh.");
+        return false;
+    }
+}
+
+async function logout() {
+    elements.logoutButton.disabled = true;
+
+    try {
+        const response = await fetch(CONFIG.endpoints.logout, {
+            method: "POST",
+            credentials: "same-origin",
+        });
+
+        if (!response.ok) {
+            showMessage("Logout failed. Please try again.", "error");
+            return;
+        }
+
+        elements.repoInput.value = "";
+        updateClearButton();
+        clearMessage();
+        removeRepositoryResult();
+
+        showLogin();
+
+    } catch (error) {
+        console.error("Logout failed:", error);
+        showMessage("Unable to contact the server.", "error");
+
+    } finally {
+        elements.logoutButton.disabled = false;
+    }
+}
+
+
+/* 07. GitHub repository URL validation
+   --------------------------------------------------------- */
+
+function validateGitHubRepository(input) {
+    if (!input || !input.trim()) {
+        return {
+            valid: false,
+            error: "Please enter a GitHub repository URL.",
+        };
+    }
+
+    let parsedURL;
+
+    try {
+        parsedURL = new URL(input.trim());
+    } catch {
+        return {
+            valid: false,
+            error: "Please enter a valid URL.",
+        };
+    }
+
+    if (parsedURL.protocol !== "https:") {
+        return {
+            valid: false,
+            error: "Please use an HTTPS GitHub URL.",
+        };
+    }
+
+    if (parsedURL.hostname.toLowerCase() !== "github.com") {
+        return {
+            valid: false,
+            error: "Only github.com URLs are supported.",
+        };
+    }
+
+    if (
+        parsedURL.port ||
+        parsedURL.username ||
+        parsedURL.password ||
+        parsedURL.search ||
+        parsedURL.hash
+    ) {
+        return {
+            valid: false,
+            error: "Please enter a clean GitHub URL.",
+        };
+    }
+
+    let path = parsedURL.pathname.replace(/\/+$/, "");
+    path = path.replace(/\.git$/, "");
+
+    const segments = path.split("/").filter(Boolean);
+
+    if (segments.length !== 2) {
+        return {
+            valid: false,
+            error: "Expected: github.com/owner/repository",
+        };
+    }
+
+    const [owner, repository] = segments;
+    const validName = /^[a-zA-Z0-9_.-]+$/;
+
+    if (
+        !validName.test(owner) ||
+        !validName.test(repository) ||
+        owner === "." ||
+        owner === ".." ||
+        repository === "." ||
+        repository === ".."
+    ) {
+        return {
+            valid: false,
+            error: "Invalid repository owner or name.",
+        };
+    }
+
+    return {
+        valid: true,
+        owner,
+        repository,
+        url: `https://github.com/${owner}/${repository}`,
+    };
+}
+
+
+/* 08. Repository result rendering
+   --------------------------------------------------------- */
+
+function removeRepositoryResult() {
+    document.getElementById("repository-result")?.remove();
+}
+
+function showRepositoryResult(repository) {
+    let resultSection = document.getElementById("repository-result");
+
+    if (!resultSection) {
+        resultSection = createElement(
+            "section",
+            "repository-result"
+        );
+
+        resultSection.id = "repository-result";
+
+        elements.repoForm.insertAdjacentElement(
+            "afterend",
+            resultSection
+        );
+    }
+
+    resultSection.replaceChildren();
+
+    const heading = createElement(
+        "h2",
+        "",
+        repository.full_name || "Repository"
+    );
+
+    const description = createElement(
+        "p",
+        "",
+        repository.description || "No description provided."
+    );
+
+    const language = createElement(
+        "p",
+        "",
+        `Primary language: ${repository.language || "Not specified"}`
+    );
+
+    const stats = [
+        ["Stars", repository.stargazers_count],
+        ["Forks", repository.forks_count],
+        ["Watchers", repository.watchers_count],
+        ["Open issues", repository.open_issues_count],
+    ];
+
+    const statsContainer = createElement("div", "repository-stats");
+
+    stats.forEach(([label, value]) => {
+        const card = createElement("div", "repository-stat");
+
+        const number = createElement(
+            "strong",
+            "",
+            formatNumber(value)
+        );
+
+        const caption = createElement("span", "", label);
+
+        card.append(number, caption);
+        statsContainer.append(card);
+    });
+
+    const link = createElement(
+        "a",
+        "",
+        "View on GitHub ↗"
+    );
+
+    link.href = repository.html_url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+
+    resultSection.append(
+        heading,
+        description,
+        language,
+        statsContainer,
+        link
+    );
+
+    resultSection.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+    });
+}
+
+
+/* 09. Language analytics — API
+   --------------------------------------------------------- */
+
+async function loadLanguageAnalytics(repositoryUrl) {
+    const resultSection = document.getElementById("repository-result");
+
+    if (!resultSection) return;
+
+    // Remove analytics from the previous repository.
+    document.getElementById("language-analytics")?.remove();
+
+    const section = createElement("section", "language-analytics");
+    section.id = "language-analytics";
+
+    const heading = createElement("div", "analytics-heading");
+
+    heading.append(
+        createElement("h3", "", "Language Analytics"),
+        createElement(
+            "p",
+            "",
+            "Code composition and language distribution"
+        )
+    );
+
+    const loading = createElement(
+        "div",
+        "language-loading",
+        "Loading language statistics..."
+    );
+
+    section.append(heading, loading);
+    resultSection.append(section);
+
+    try {
+        const response = await fetch(
+            `${CONFIG.endpoints.languages}?url=${encodeURIComponent(repositoryUrl)}`,
+            {
+                method: "GET",
+                credentials: "same-origin",
+                headers: {
+                    Accept: "application/json",
+                },
+            }
+        );
+
+        const data = await readJson(response);
+
+        if (response.status === 401) {
+            showLogin("Your session has expired. Please sign in again.");
+            return;
+        }
+
+        if (!response.ok) {
+            throw new Error(
+                data.error || "Unable to load language analytics."
+            );
+        }
+
+        renderLanguageAnalytics(section, data);
+
+    } catch (error) {
+        console.error("Language analytics error:", error);
+
+        loading.className = "language-error";
+        loading.textContent =
+            error.message || "Unable to load language analytics.";
+    }
+}
+
+
+/* 10. Language analytics — rendering
+   --------------------------------------------------------- */
+
+function renderLanguageAnalytics(container, data) {
+    container.replaceChildren();
+
+    const heading = createElement("div", "analytics-heading");
+
+    heading.append(
+        createElement("h3", "", "Language Analytics"),
+        createElement(
+            "p",
+            "",
+            "Code composition and language distribution"
+        )
+    );
+
+    const languages = Array.isArray(data.languages)
+        ? data.languages.filter((language) => {
+            return (
+                language &&
+                typeof language.language === "string" &&
+                Number.isFinite(Number(language.bytes)) &&
+                Number(language.bytes) >= 0
+            );
+        })
+        : [];
+
+    const totalBytes = Number(data.totalBytes) || 0;
+
+    const summary = createElement("div", "language-summary");
+
+    summary.append(
+        createElement("span", "", "Total code size"),
+        createElement("strong", "", formatBytes(totalBytes)),
+        createElement(
+            "span",
+            "",
+            `${languages.length} ${
+                languages.length === 1 ? "language" : "languages"
+            }`
+        )
+    );
+
+    container.append(heading, summary);
+
+    if (languages.length === 0 || totalBytes <= 0) {
+        container.append(
+            createElement(
+                "p",
+                "language-empty",
+                "No language statistics available for this repository."
+            )
+        );
+
+        return;
+    }
+
+    // Sort by byte count to ensure the primary language is correct.
+    languages.sort((a, b) => Number(b.bytes) - Number(a.bytes));
+
+    const primaryLanguage = languages[0];
+    const primaryPercentage = Number(primaryLanguage.percentage) || 0;
+
+    // Primary language summary.
+    const primary = createElement("div", "primary-language");
+
+    const primaryDot = createElement("span", "language-dot");
+    primaryDot.style.backgroundColor = getLanguageColor(
+        primaryLanguage.language,
+        0
+    );
+
+    primary.append(
+        primaryDot,
+        createElement("span", "", "Primary language"),
+        createElement("strong", "", primaryLanguage.language),
+        createElement(
+            "strong",
+            "",
+            `${primaryPercentage.toFixed(2)}%`
+        )
+    );
+
+    container.append(primary);
+
+    // Language distribution bar.
+    const distribution = createElement(
+        "div",
+        "language-distribution"
+    );
+
+    distribution.setAttribute("role", "img");
+
+    distribution.setAttribute(
+        "aria-label",
+        languages
+            .map((language) => {
+                const percentage = Number(language.percentage) || 0;
+
+                return `${language.language}: ${percentage.toFixed(2)}%`;
+            })
+            .join(", ")
+    );
+
+    languages.forEach((language, index) => {
+        const percentage = Math.min(
+            100,
+            Math.max(0, Number(language.percentage) || 0)
+        );
+
+        const segment = createElement("div", "language-segment");
+
+        segment.style.width = `${percentage}%`;
+        segment.style.backgroundColor = getLanguageColor(
+            language.language,
+            index
+        );
+
+        segment.title =
+            `${language.language}: ${percentage.toFixed(2)}%`;
+
+        distribution.append(segment);
+    });
+
+    container.append(distribution);
+
+    // Detailed language breakdown.
+    container.append(
+        createElement("h4", "language-list-heading", "Language breakdown")
+    );
+
+    const list = createElement("div", "language-list");
+
+    languages.forEach((language, index) => {
+        const percentage = Number(language.percentage) || 0;
+        const bytes = Number(language.bytes) || 0;
+
+        const row = createElement("div", "language-row");
+
+        const left = createElement("div", "language-row-name");
+
+        const dot = createElement("span", "language-dot");
+        dot.style.backgroundColor = getLanguageColor(
+            language.language,
+            index
+        );
+
+        left.append(
+            dot,
+            createElement("span", "", language.language)
+        );
+
+        const right = createElement("div", "language-row-stats");
+
+        right.append(
+            createElement("span", "", formatBytes(bytes)),
+            createElement(
+                "strong",
+                "",
+                `${percentage.toFixed(2)}%`
+            )
+        );
+
+        row.append(left, right);
+        list.append(row);
+    });
+
+    container.append(list);
+}
+
+
+/* 11. Repository analysis workflow
+   --------------------------------------------------------- */
+
+function setAnalyzing(isAnalyzing) {
+    elements.analyzeButton.disabled = isAnalyzing;
+    elements.repoInput.disabled = isAnalyzing;
+    elements.clearButton.disabled = isAnalyzing;
+
+    const buttonText = elements.analyzeButton.querySelector(".button-text");
+
+    if (buttonText) {
+        buttonText.textContent = isAnalyzing
+            ? "Analyzing..."
+            : "Analyze repository";
+    }
+
+    elements.repoForm.setAttribute(
+        "aria-busy",
+        String(isAnalyzing)
+    );
+}
+
+async function analyzeRepository(repositoryUrl) {
+    const response = await fetch(
+        `${CONFIG.endpoints.repository}?url=${encodeURIComponent(repositoryUrl)}`,
+        {
+            method: "GET",
+            credentials: "same-origin",
+            headers: {
+                Accept: "application/json",
+            },
+        }
+    );
+
+    const data = await readJson(response);
+
+    if (response.status === 401) {
+        showLogin("Your session has expired. Please sign in again.");
+        return;
+    }
+
+    if (!response.ok) {
+        showMessage(
+            data.error || "Repository analysis failed.",
+            "error"
+        );
+
+        return;
+    }
+
+    showRepositoryResult(data);
+
+    // Language analytics is independent of the main repository result.
+    await loadLanguageAnalytics(repositoryUrl);
+}
+
+async function handleRepositorySubmit(event) {
+    event.preventDefault();
+    clearMessage();
+
+    const result = validateGitHubRepository(elements.repoInput.value);
+
+    if (!result.valid) {
+        showMessage(result.error, "error");
+
+        elements.repoInput.setAttribute("aria-invalid", "true");
+        elements.repoInput.focus();
+
+        return;
+    }
+
+    elements.repoInput.removeAttribute("aria-invalid");
+
+    setAnalyzing(true);
+
+    try {
+        await analyzeRepository(result.url);
+
+    } catch (error) {
+        console.error("Repository analysis error:", error);
+
+        showMessage(
+            "Unable to connect to the RepoLens server. Please try again.",
+            "error"
+        );
+
+    } finally {
+        setAnalyzing(false);
+    }
+}
+
+
+/* 12. Search input controls
+   --------------------------------------------------------- */
+
+function updateClearButton() {
+    elements.clearButton.hidden = elements.repoInput.value.length === 0;
+}
+
+function clearRepositoryInput() {
+    elements.repoInput.value = "";
+
+    elements.repoInput.removeAttribute("aria-invalid");
+
+    clearMessage();
+    updateClearButton();
+
+    elements.repoInput.focus();
+}
+
+function initializeSearchControls() {
+    elements.repoForm.addEventListener(
+        "submit",
+        handleRepositorySubmit
+    );
+
+    elements.repoInput.addEventListener("input", () => {
+        clearMessage();
+
+        elements.repoInput.removeAttribute("aria-invalid");
+
+        updateClearButton();
+    });
+
+    elements.clearButton.addEventListener(
+        "click",
+        clearRepositoryInput
+    );
+
+    document.addEventListener("keydown", (event) => {
+        if (
+            event.key === "Escape" &&
+            document.activeElement === elements.repoInput
+        ) {
+            clearRepositoryInput();
+        }
+    });
+
+    updateClearButton();
+}
+
+
+/* 13. Authentication controls
+   --------------------------------------------------------- */
+
+function initializeAuthenticationControls() {
+    elements.logoutButton.addEventListener("click", logout);
+}
+
+
+/* 14. Application initialization
+   --------------------------------------------------------- */
+
+async function initializeApp() {
+    initializeTheme();
+    initializeSearchControls();
+    initializeAuthenticationControls();
+
+    const params = new URLSearchParams(window.location.search);
+    const authStatus = params.get("auth");
+
+    let authMessage = "";
+
+    if (authStatus === "denied") {
+        authMessage = "GitHub sign-in was cancelled.";
+    } else if (authStatus === "failed") {
+        authMessage = "GitHub sign-in failed. Please try again.";
+    }
+
+    if (authStatus) {
+        window.history.replaceState(
+            {},
+            document.title,
+            window.location.pathname
+        );
+    }
+
+    const authenticated = await checkAuthentication();
+
+    if (!authenticated && authMessage) {
+        showLogin(authMessage);
+    }
+}
+
+initializeApp();
