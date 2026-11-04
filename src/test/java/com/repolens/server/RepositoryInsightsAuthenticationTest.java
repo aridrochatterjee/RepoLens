@@ -47,6 +47,10 @@ class RepositoryInsightsAuthenticationTest {
                 "/api/repository/activity",
                 "/api/repository/commits",
                 "/api/repository/contributors",
+                "/api/repository/contributors/octocat?url=https%3A%2F%2Fgithub.com%2Foctocat%2FHello-World",
+                "/api/repository/pull-requests",
+                "/api/repository/issues",
+                "/api/repository/collaboration",
                 "/api/repository/codebase"
         }) {
             HttpRequest request = HttpRequest.newBuilder()

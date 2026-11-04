@@ -5,5 +5,6 @@ public record ContributorStat(
         String avatarUrl,
         String profileUrl,
         int contributions,
-        double contributionShare
+        Double contributionShare,
+        boolean bot
 ) {}

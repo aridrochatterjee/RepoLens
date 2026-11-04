@@ -82,4 +82,36 @@ class RepositoryControllerValidationTest {
                 () -> controller.parseLargestLimit("unlimited")
         );
     }
+
+    @Test
+    void enforcesBoundedDeveloperAnalyticsPagination() {
+        assertEquals(1, controller.parseAnalyticsPage("1"));
+        assertEquals(10, controller.parseAnalyticsPage("10"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> controller.parseAnalyticsPage("0")
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> controller.parseAnalyticsPage("11")
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> controller.parseAnalyticsPage("all")
+        );
+        assertEquals(1, controller.parseAnalyticsLimit("1"));
+        assertEquals(100, controller.parseAnalyticsLimit("100"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> controller.parseAnalyticsLimit("0")
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> controller.parseAnalyticsLimit("101")
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> controller.parseAnalyticsLimit("all")
+        );
+    }
 }
