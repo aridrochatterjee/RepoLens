@@ -10,6 +10,9 @@ import com.repolens.controller.RepositoryController;
 import com.repolens.server.WebServer;
 import com.repolens.service.RepositoryService;
 
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+
 public class Main {
 
     public static void main(String[] args) {
@@ -43,6 +46,7 @@ public class Main {
         WebServer server =
                 new WebServer(
                         8080,
+                        InetAddress.getLoopbackAddress(),
                         oauthController,
                         repositoryController,
                         sessionManager

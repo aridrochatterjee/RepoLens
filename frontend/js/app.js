@@ -32,6 +32,8 @@ const elements = {
     message: document.getElementById("message"),
 };
 
+let analysisRequestId = 0;
+
 
 /* 02. Configuration
    --------------------------------------------------------- */
@@ -44,6 +46,10 @@ const CONFIG = {
         logout: "/api/auth/logout",
         repository: "/api/repository",
         languages: "/api/repository/languages",
+        health: "/api/repository/health",
+        activity: "/api/repository/activity",
+        commits: "/api/repository/commits",
+        contributors: "/api/repository/contributors",
     },
 
     languageColors: {
@@ -281,10 +287,14 @@ async function checkAuthentication() {
             return false;
         }
 
-        const user = await readJson(response);
+        const payload = await readJson(response);
+        const user = payload?.user;
 
-        // The API should return profile fields at the top level.
-        if (!user || (!user.username && !user.name)) {
+        if (
+            payload?.authenticated !== true ||
+            !user ||
+            (!user.username && !user.name)
+        ) {
             showLogin();
             return false;
         }
@@ -302,6 +312,7 @@ async function checkAuthentication() {
 
 async function logout() {
     elements.logoutButton.disabled = true;
+    analysisRequestId += 1;
 
     try {
         const response = await fetch(CONFIG.endpoints.logout, {
@@ -444,22 +455,46 @@ function showRepositoryResult(repository) {
 
     resultSection.replaceChildren();
 
-    const heading = createElement(
+    const heading = createElement("div", "repository-heading");
+    const headingTitle = createElement(
         "h2",
         "",
-        repository.full_name || "Repository"
+        repository.full_name || repository.name || "Repository"
+    );
+    const repositoryLink = safeGitHubUrl(repository.html_url);
+    if (repositoryLink) {
+        const link = createElement("a", "repository-github-link", "View on GitHub ↗");
+        link.href = repositoryLink;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        heading.append(headingTitle, link);
+    } else {
+        heading.append(headingTitle);
+    }
+
+    heading.append(
+        createElement(
+            "span",
+            "repository-visibility",
+            typeof repository.private === "boolean"
+                ? repository.private ? "Private" : "Public"
+                : "Visibility unavailable"
+        )
     );
 
     const description = createElement(
         "p",
-        "",
+        "repository-description",
         repository.description || "No description provided."
     );
 
-    const language = createElement(
-        "p",
-        "",
-        `Primary language: ${repository.language || "Not specified"}`
+    const metadata = createElement("div", "repository-metadata");
+    metadata.append(
+        createElement(
+            "span",
+            "",
+            `Primary language: ${repository.language || "Not specified"}`
+        )
     );
 
     const stats = [
@@ -477,7 +512,9 @@ function showRepositoryResult(repository) {
         const number = createElement(
             "strong",
             "",
-            formatNumber(value)
+            value === null || value === undefined || !Number.isFinite(Number(value))
+                ? "—"
+                : formatNumber(value)
         );
 
         const caption = createElement("span", "", label);
@@ -486,23 +523,13 @@ function showRepositoryResult(repository) {
         statsContainer.append(card);
     });
 
-    const link = createElement(
-        "a",
-        "",
-        "View on GitHub ↗"
-    );
+    if (repository.language) {
+        metadata.append(
+            createElement("span", "repository-language-tag", repository.language)
+        );
+    }
 
-    link.href = repository.html_url;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-
-    resultSection.append(
-        heading,
-        description,
-        language,
-        statsContainer,
-        link
-    );
+    resultSection.append(heading, description, metadata, statsContainer);
 
     resultSection.scrollIntoView({
         behavior: "smooth",
@@ -510,11 +537,484 @@ function showRepositoryResult(repository) {
     });
 }
 
+function safeGitHubUrl(value) {
+    try {
+        const url = new URL(value);
+        return url.protocol === "https:" &&
+            url.hostname.toLowerCase() === "github.com" &&
+            !url.port &&
+            !url.username &&
+            !url.password
+            ? url.href
+            : null;
+    } catch {
+        return null;
+    }
+}
+
+function safeAvatarUrl(value) {
+    try {
+        const url = new URL(value);
+        return url.protocol === "https:" &&
+            url.hostname.toLowerCase() === "avatars.githubusercontent.com" &&
+            !url.port
+            ? url.href
+            : null;
+    } catch {
+        return null;
+    }
+}
+
+function formatTimestamp(value) {
+    if (!value) return "Date unavailable";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "Date unavailable";
+    return new Intl.DateTimeFormat(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+    }).format(date);
+}
+
+function createInsightPanel(className, title, description) {
+    const panel = createElement("section", `insight-panel ${className}`);
+    const heading = createElement("div", "insight-heading");
+    heading.append(
+        createElement("h3", "", title),
+        createElement("p", "", description)
+    );
+    const body = createElement("div", "insight-body");
+    body.setAttribute("aria-live", "polite");
+    body.setAttribute("aria-busy", "true");
+    body.append(createElement("div", "insight-loading", `Loading ${title.toLowerCase()}...`));
+    panel.append(heading, body);
+    return { panel, body };
+}
+
+function setInsightMessage(container, message, type = "empty") {
+    container.replaceChildren(
+        createElement("p", `insight-message ${type}`, message)
+    );
+    container.setAttribute("aria-busy", "false");
+}
+
+function renderHealth(container, health) {
+    container.replaceChildren();
+    container.setAttribute("aria-busy", "false");
+
+    const summary = createElement("div", "health-summary");
+    const score = health.score;
+    const scoreRing = createElement("div", "health-score-ring");
+    scoreRing.setAttribute(
+        "role",
+        score === null || score === undefined ? "img" : "meter"
+    );
+    scoreRing.setAttribute(
+        "aria-label",
+        score === null || score === undefined
+            ? "Repository health score unavailable"
+            : `RepoLens estimated repository health score: ${score} out of 100`
+    );
+    if (Number.isFinite(Number(score))) {
+        scoreRing.style.setProperty(
+            "--score-percent",
+            `${Math.max(0, Math.min(100, Number(score)))}%`
+        );
+        scoreRing.append(
+            createElement("strong", "", String(score)),
+            createElement("span", "", "out of 100")
+        );
+    } else {
+        scoreRing.classList.add("unavailable");
+        scoreRing.append(
+            createElement("strong", "", "—"),
+            createElement("span", "", "unavailable")
+        );
+    }
+
+    const scoreCopy = createElement("div", "health-score-copy");
+    scoreCopy.append(
+        createElement("strong", "", score === null || score === undefined
+            ? "Not enough data"
+            : "Repository health estimate"),
+        createElement(
+            "p",
+            "",
+            `${health.availableWeight || 0}% of weighted factors had usable data. This is a RepoLens estimate, not a GitHub rating.`
+        )
+    );
+    summary.append(scoreRing, scoreCopy);
+    container.append(summary);
+
+    const factors = Array.isArray(health.factors) ? health.factors : [];
+    const factorList = createElement("div", "health-factors");
+    factors.forEach((factor) => {
+        const row = createElement("div", "health-factor");
+        const label = createElement("div", "health-factor-label");
+        label.append(
+            createElement("strong", "", factor.name || "Factor"),
+            createElement(
+                "span",
+                "",
+                factor.score === null || factor.score === undefined
+                    ? "Unavailable"
+                    : `${factor.score}/100`
+            )
+        );
+        const track = createElement("div", "health-factor-track");
+        track.setAttribute("aria-hidden", "true");
+        const fill = createElement("span", "health-factor-fill");
+        fill.style.width = factor.score === null || factor.score === undefined
+            ? "0%"
+            : `${Math.max(0, Math.min(100, factor.score))}%`;
+        track.append(fill);
+        row.append(
+            label,
+            track,
+            createElement("p", "", factor.explanation || "No explanation provided.")
+        );
+        factorList.append(row);
+    });
+    container.append(factorList);
+
+    const highlights = createElement("div", "health-highlights");
+    const strengths = Array.isArray(health.strengths) ? health.strengths : [];
+    const attention = Array.isArray(health.areasForAttention)
+        ? health.areasForAttention
+        : [];
+    highlights.append(
+        createHighlightList("Positive signals", strengths),
+        createHighlightList("Needs attention", attention)
+    );
+    container.append(highlights);
+    container.append(createElement(
+        "p",
+        "insight-limitation",
+        health.disclaimer || "This score is an estimate based on available GitHub data."
+    ));
+}
+
+function createHighlightList(title, values) {
+    const group = createElement("div", "health-highlight");
+    group.append(createElement("h4", "", title));
+    const list = createElement("ul", "");
+    if (values.length === 0) {
+        list.append(createElement("li", "", "No signals to report."));
+    } else {
+        values.forEach((value) => list.append(createElement("li", "", value)));
+    }
+    group.append(list);
+    return group;
+}
+
+function renderActivity(container, activity) {
+    container.replaceChildren();
+    container.setAttribute("aria-busy", "false");
+    if (!activity.available) {
+        setInsightMessage(
+            container,
+            activity.unavailableReason || "Commit activity is not available yet."
+        );
+        return;
+    }
+
+    const metrics = createElement("div", "activity-metrics");
+    [
+        [formatNumber(activity.totalCommits), "commits in period"],
+        [Number(activity.averageCommitsPerWeek).toFixed(1), "average per week"],
+        [activity.mostActiveDay || "—", "most active day"],
+    ].forEach(([value, label]) => {
+        const metric = createElement("div", "activity-metric");
+        metric.append(
+            createElement("strong", "", value),
+            createElement("span", "", label)
+        );
+        metrics.append(metric);
+    });
+    container.append(metrics);
+
+    const weeks = Array.isArray(activity.weeklyActivity)
+        ? activity.weeklyActivity
+        : [];
+    if (weeks.length === 0) {
+        container.append(createElement(
+            "p",
+            "insight-message",
+            "No weekly activity points were returned."
+        ));
+        return;
+    }
+
+    const max = Math.max(...weeks.map((week) => Number(week.commits) || 0));
+    const chart = createElement("div", "activity-chart");
+    chart.setAttribute("role", "img");
+    chart.setAttribute(
+        "aria-label",
+        `Weekly commit counts over the last ${activity.periodDays} days: ${
+            weeks.map((week) => `${week.weekStarting}: ${week.commits}`).join("; ")
+        }`
+    );
+    weeks.forEach((week) => {
+        const item = createElement("div", "activity-week");
+        const count = Math.max(0, Number(week.commits) || 0);
+        const bar = createElement("div", "activity-bar-track");
+        const fill = createElement("span", "activity-bar");
+        fill.style.height = max === 0 ? "0%" : `${count / max * 100}%`;
+        bar.append(fill);
+        item.append(
+            createElement("span", "activity-count", formatNumber(count)),
+            bar,
+            createElement(
+                "span",
+                "activity-week-label",
+                week.weekStarting || ""
+            )
+        );
+        chart.append(item);
+    });
+    container.append(chart);
+}
+
+function renderCommits(container, data, repositoryUrl, requestId) {
+    container.replaceChildren();
+    container.setAttribute("aria-busy", "false");
+    const commits = Array.isArray(data.commits) ? data.commits : [];
+    if (commits.length === 0) {
+        setInsightMessage(container, "No commits were returned for this page.");
+        return;
+    }
+
+    const list = createElement("ol", "commit-list");
+    commits.forEach((commit) => {
+        const item = createElement("li", "commit-item");
+        const marker = createElement("span", "commit-marker");
+        marker.setAttribute("aria-hidden", "true");
+        const content = createElement("div", "commit-content");
+        const title = createElement("p", "commit-message", commit.message || "Commit message unavailable");
+        const details = createElement("div", "commit-details");
+        details.append(
+            createElement("span", "", commit.author || "Unknown author"),
+            createElement("time", "", formatTimestamp(commit.date))
+        );
+        if (commit.date) details.lastChild.dateTime = commit.date;
+        const shortSha = createElement("span", "commit-sha", commit.shortSha || "");
+        const commitUrl = safeGitHubUrl(commit.htmlUrl);
+        if (commitUrl) {
+            const link = createElement("a", "commit-sha-link", commit.shortSha || "Commit");
+            link.href = commitUrl;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            details.append(link);
+        } else {
+            details.append(shortSha);
+        }
+        content.append(title, details);
+        item.append(marker, content);
+        list.append(item);
+    });
+    container.append(list);
+
+    const pagination = createElement("div", "commit-pagination");
+    const page = Number(data.page) || 1;
+    const previous = createElement("button", "", "Previous");
+    previous.type = "button";
+    previous.disabled = page <= 1;
+    previous.addEventListener("click", () => {
+        loadCommitPage(container, repositoryUrl, page - 1, requestId);
+    });
+    const next = createElement("button", "", "Next");
+    next.type = "button";
+    next.disabled = commits.length < (Number(data.limit) || 10);
+    next.addEventListener("click", () => {
+        loadCommitPage(container, repositoryUrl, page + 1, requestId);
+    });
+    pagination.append(
+        previous,
+        createElement("span", "", `Page ${page}`),
+        next
+    );
+    container.append(pagination);
+}
+
+function renderContributors(container, data) {
+    container.replaceChildren();
+    container.setAttribute("aria-busy", "false");
+    const contributors = Array.isArray(data.contributors)
+        ? data.contributors
+        : [];
+    if (contributors.length === 0) {
+        setInsightMessage(
+            container,
+            data.available === false
+                ? data.limitation || "Contributor statistics are unavailable."
+                : "No contributors were returned for this repository."
+        );
+        return;
+    }
+
+    container.append(createElement(
+        "p",
+        "contributor-summary",
+        `${formatNumber(data.totalReturned)} contributors returned by GitHub`
+    ));
+    const list = createElement("ol", "contributor-list");
+    contributors.forEach((contributor) => {
+        const item = createElement("li", "contributor-item");
+        const avatarUrl = safeAvatarUrl(contributor.avatarUrl);
+        const avatar = createElement("span", "contributor-avatar-fallback");
+        if (avatarUrl) {
+            const image = createElement("img");
+            image.src = avatarUrl;
+            image.alt = "";
+            image.loading = "lazy";
+            image.addEventListener("error", () => image.remove());
+            avatar.append(image);
+        }
+
+        const name = contributor.login || "Deleted or unavailable account";
+        const profileUrl = safeGitHubUrl(contributor.profileUrl);
+        const nameNode = profileUrl
+            ? createElement("a", "contributor-name", name)
+            : createElement("span", "contributor-name", name);
+        if (profileUrl) {
+            nameNode.href = profileUrl;
+            nameNode.target = "_blank";
+            nameNode.rel = "noopener noreferrer";
+        }
+        const info = createElement("div", "contributor-info");
+        const count = Number(contributor.contributions) || 0;
+        info.append(
+            nameNode,
+            createElement("span", "", `${formatNumber(count)} contributions`)
+        );
+        const distribution = createElement("div", "contributor-distribution");
+        distribution.setAttribute("aria-label", `${contributor.contributionShare || 0}% of returned contributions`);
+        const fill = createElement("span", "");
+        fill.style.width = `${Math.max(0, Math.min(100, Number(contributor.contributionShare) || 0))}%`;
+        distribution.append(fill);
+        item.append(avatar, info, distribution);
+        list.append(item);
+    });
+    container.append(list);
+    container.append(createElement(
+        "p",
+        "insight-limitation",
+        data.limitation || "GitHub contributor data may be incomplete."
+    ));
+}
+
+async function requestInsight(endpoint, repositoryUrl, requestId, parameters = {}) {
+    const query = new URLSearchParams({
+        url: repositoryUrl,
+        ...parameters,
+    });
+    const response = await fetch(`${endpoint}?${query}`, {
+        method: "GET",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+    });
+    const data = await readJson(response);
+    if (requestId !== analysisRequestId) return null;
+
+    if (response.status === 401) {
+        analysisRequestId += 1;
+        showLogin("Your session has expired. Please sign in again.");
+        return null;
+    }
+    if (!response.ok) {
+        throw new Error(data.error || "Unable to load repository insights.");
+    }
+    return data;
+}
+
+async function loadInsight(panel, endpoint, repositoryUrl, requestId, render, parameters = {}) {
+    try {
+        const data = await requestInsight(endpoint, repositoryUrl, requestId, parameters);
+        if (data && requestId === analysisRequestId) render(panel, data);
+    } catch (error) {
+        if (requestId !== analysisRequestId) return;
+        console.error("Repository insight error:", error);
+        setInsightMessage(panel, error.message || "Unable to load this insight.", "error");
+    }
+}
+
+async function loadCommitPage(panel, repositoryUrl, page, requestId) {
+    panel.setAttribute("aria-busy", "true");
+    panel.replaceChildren(createElement("div", "insight-loading", "Loading recent commits..."));
+    await loadInsight(
+        panel,
+        CONFIG.endpoints.commits,
+        repositoryUrl,
+        requestId,
+        (target, data) => renderCommits(target, data, repositoryUrl, requestId),
+        { page: String(page), limit: "10" }
+    );
+}
+
+function loadRepositoryInsights(resultSection, repositoryUrl, requestId) {
+    const insights = createElement("section", "repository-insights");
+    const header = createElement("div", "insights-section-heading");
+    header.append(
+        createElement("span", "section-label", "REPOSITORY INSIGHTS"),
+        createElement("p", "", "Signals and activity sourced from GitHub.")
+    );
+    const health = createInsightPanel(
+        "health-panel",
+        "Repository health",
+        "An explainable RepoLens estimate"
+    );
+    const activity = createInsightPanel(
+        "activity-panel",
+        "Commit activity",
+        "Weekly commits across the last 30 days"
+    );
+    const commits = createInsightPanel(
+        "commits-panel",
+        "Recent commits",
+        "Latest changes from the default repository history"
+    );
+    const contributors = createInsightPanel(
+        "contributors-panel",
+        "Contributors",
+        "Contribution activity returned by GitHub"
+    );
+    insights.append(
+        header,
+        health.panel,
+        activity.panel,
+        commits.panel,
+        contributors.panel
+    );
+    resultSection.append(insights);
+
+    void loadInsight(
+        health.body,
+        CONFIG.endpoints.health,
+        repositoryUrl,
+        requestId,
+        renderHealth
+    );
+    void loadInsight(
+        activity.body,
+        CONFIG.endpoints.activity,
+        repositoryUrl,
+        requestId,
+        renderActivity
+    );
+    void loadInsight(
+        contributors.body,
+        CONFIG.endpoints.contributors,
+        repositoryUrl,
+        requestId,
+        renderContributors
+    );
+    void loadCommitPage(commits.body, repositoryUrl, 1, requestId);
+}
+
 
 /* 09. Language analytics — API
    --------------------------------------------------------- */
 
-async function loadLanguageAnalytics(repositoryUrl) {
+async function loadLanguageAnalytics(repositoryUrl, requestId) {
     const resultSection = document.getElementById("repository-result");
 
     if (!resultSection) return;
@@ -559,7 +1059,10 @@ async function loadLanguageAnalytics(repositoryUrl) {
 
         const data = await readJson(response);
 
+        if (requestId !== analysisRequestId) return;
+
         if (response.status === 401) {
+            analysisRequestId += 1;
             showLogin("Your session has expired. Please sign in again.");
             return;
         }
@@ -573,6 +1076,7 @@ async function loadLanguageAnalytics(repositoryUrl) {
         renderLanguageAnalytics(section, data);
 
     } catch (error) {
+        if (requestId !== analysisRequestId) return;
         console.error("Language analytics error:", error);
 
         loading.className = "language-error";
@@ -776,7 +1280,7 @@ function setAnalyzing(isAnalyzing) {
     );
 }
 
-async function analyzeRepository(repositoryUrl) {
+async function analyzeRepository(repositoryUrl, requestId) {
     const response = await fetch(
         `${CONFIG.endpoints.repository}?url=${encodeURIComponent(repositoryUrl)}`,
         {
@@ -790,7 +1294,10 @@ async function analyzeRepository(repositoryUrl) {
 
     const data = await readJson(response);
 
+    if (requestId !== analysisRequestId) return;
+
     if (response.status === 401) {
+        analysisRequestId += 1;
         showLogin("Your session has expired. Please sign in again.");
         return;
     }
@@ -805,9 +1312,12 @@ async function analyzeRepository(repositoryUrl) {
     }
 
     showRepositoryResult(data);
+    const resultSection = document.getElementById("repository-result");
+    if (resultSection) {
+        loadRepositoryInsights(resultSection, repositoryUrl, requestId);
+    }
 
-    // Language analytics is independent of the main repository result.
-    await loadLanguageAnalytics(repositoryUrl);
+    void loadLanguageAnalytics(repositoryUrl, requestId);
 }
 
 async function handleRepositorySubmit(event) {
@@ -827,10 +1337,12 @@ async function handleRepositorySubmit(event) {
 
     elements.repoInput.removeAttribute("aria-invalid");
 
+    const requestId = ++analysisRequestId;
+    removeRepositoryResult();
     setAnalyzing(true);
 
     try {
-        await analyzeRepository(result.url);
+        await analyzeRepository(result.url, requestId);
 
     } catch (error) {
         console.error("Repository analysis error:", error);

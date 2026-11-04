@@ -8,16 +8,19 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class WebServer {
 
     private final int port;
+    private final InetAddress bindAddress;
     private final Path frontendDirectory;
 
     private final OAuthController oauthController;
@@ -25,6 +28,7 @@ public class WebServer {
     private final SessionManager sessionManager;
 
     private HttpServer server;
+    private ExecutorService executor;
 
     private static final Map<String, String> CONTENT_TYPES = Map.of(
             ".html", "text/html; charset=UTF-8",
@@ -40,11 +44,13 @@ public class WebServer {
 
     public WebServer(
             int port,
+            InetAddress bindAddress,
             OAuthController oauthController,
             RepositoryController repositoryController,
             SessionManager sessionManager
     ) {
         this.port = port;
+        this.bindAddress = bindAddress;
         this.oauthController = oauthController;
         this.repositoryController = repositoryController;
         this.sessionManager = sessionManager;
@@ -57,7 +63,7 @@ public class WebServer {
     public void start() {
         try {
             server = HttpServer.create(
-                    new InetSocketAddress(port),
+                    new InetSocketAddress(bindAddress, port),
                     0
             );
 
@@ -89,18 +95,52 @@ public class WebServer {
             );
 
             server.createContext(
+                    "/api/repository/health",
+                    exchange -> authenticatedRepositoryInsight(
+                            exchange,
+                            repositoryController::getRepositoryHealth
+                    )
+            );
+
+            server.createContext(
+                    "/api/repository/activity",
+                    exchange -> authenticatedRepositoryInsight(
+                            exchange,
+                            repositoryController::getRepositoryActivity
+                    )
+            );
+
+            server.createContext(
+                    "/api/repository/commits",
+                    exchange -> authenticatedRepositoryInsight(
+                            exchange,
+                            repositoryController::getRepositoryCommits
+                    )
+            );
+
+            server.createContext(
+                    "/api/repository/contributors",
+                    exchange -> authenticatedRepositoryInsight(
+                            exchange,
+                            repositoryController::getRepositoryContributors
+                    )
+            );
+
+            server.createContext(
                     "/api/repository",
                     this::authenticatedRepository
             );
 
             server.createContext("/", this::serveStaticFiles);
 
-            server.setExecutor(Executors.newFixedThreadPool(10));
+            executor = Executors.newFixedThreadPool(10);
+            server.setExecutor(executor);
 
             server.start();
 
             System.out.println(
-                    "RepoLens running at http://localhost:" + port
+                    "RepoLens running at http://localhost:"
+                            + server.getAddress().getPort()
             );
 
         } catch (IOException exception) {
@@ -108,6 +148,24 @@ public class WebServer {
                     "Failed to start RepoLens server",
                     exception
             );
+        }
+    }
+
+    public int getPort() {
+        if (server == null) {
+            throw new IllegalStateException("Server has not been started.");
+        }
+        return server.getAddress().getPort();
+    }
+
+    public void stop() {
+        if (server != null) {
+            server.stop(0);
+            server = null;
+        }
+        if (executor != null) {
+            executor.shutdownNow();
+            executor = null;
         }
     }
 
@@ -146,6 +204,23 @@ public class WebServer {
         }
 
         repositoryController.getRepositoryLanguages(exchange, user);
+    }
+
+    private void authenticatedRepositoryInsight(
+            HttpExchange exchange,
+            RepositoryInsightHandler handler
+    ) throws IOException {
+        var user = getAuthenticatedUser(exchange);
+        if (user == null) {
+            sendResponse(
+                    exchange,
+                    401,
+                    "{\"error\":\"Authentication required.\"}",
+                    "application/json; charset=UTF-8"
+            );
+            return;
+        }
+        handler.handle(exchange, user);
     }
 
     private com.repolens.auth.GitHubOAuthService.GitHubUser
@@ -270,5 +345,13 @@ public class WebServer {
         try (var output = exchange.getResponseBody()) {
             output.write(bytes);
         }
+    }
+
+    @FunctionalInterface
+    private interface RepositoryInsightHandler {
+        void handle(
+                HttpExchange exchange,
+                com.repolens.auth.GitHubOAuthService.GitHubUser user
+        ) throws IOException;
     }
 }

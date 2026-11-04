@@ -1367,8 +1367,520 @@ main#dashboard-view {
   }
 }
 
+  /* Repository insights */
 
-/* 18. Accessibility and motion preferences
+  .repository-heading {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .repository-heading h2 {
+    min-width: 0;
+    margin-right: auto;
+  }
+
+  .repository-github-link {
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .repository-visibility,
+  .repository-language-tag {
+    padding: 4px 9px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    font-size: 10px;
+  }
+
+  .repository-metadata {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 9px;
+    margin-top: 12px;
+    color: var(--text-secondary);
+    font-size: 11px;
+  }
+
+  .repository-result .repository-description {
+    margin-top: 12px;
+  }
+
+  .repository-insights {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 15px;
+    margin-top: 32px;
+  }
+
+  .insights-section-heading,
+  .health-panel,
+  .activity-panel {
+    grid-column: 1 / -1;
+  }
+
+  .insights-section-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 2px;
+  }
+
+  .insights-section-heading p {
+    color: var(--text-muted);
+    font-size: 11px;
+  }
+
+  .insight-panel {
+    min-width: 0;
+    padding: 20px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-secondary);
+  }
+
+  .insight-heading h3 {
+    font-family: var(--font-heading);
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .insight-heading p {
+    margin-top: 4px;
+    color: var(--text-muted);
+    font-size: 10px;
+  }
+
+  .insight-body {
+    min-width: 0;
+    margin-top: 17px;
+  }
+
+  .insight-loading,
+  .insight-message {
+    padding: 17px 13px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text-secondary);
+    font-size: 11px;
+  }
+
+  .insight-loading {
+    overflow: hidden;
+    position: relative;
+  }
+
+  .insight-loading::after {
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, var(--surface-hover), transparent);
+    animation: insight-shimmer 1.4s infinite;
+    content: "";
+  }
+
+  @keyframes insight-shimmer {
+    to { transform: translateX(100%); }
+  }
+
+  .insight-message.error {
+    border-color: rgba(251, 113, 133, 0.25);
+    color: var(--error);
+  }
+
+  .health-summary {
+    display: flex;
+    align-items: center;
+    gap: 19px;
+  }
+
+  .health-score-ring {
+    width: 100px;
+    height: 100px;
+    flex: 0 0 100px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: conic-gradient(var(--accent) var(--score-percent, 0%), var(--surface-hover) 0);
+    position: relative;
+    isolation: isolate;
+  }
+
+  .health-score-ring::before {
+    position: absolute;
+    z-index: -1;
+    inset: 7px;
+    border-radius: inherit;
+    background: var(--surface-secondary);
+    content: "";
+  }
+
+  .health-score-ring.unavailable {
+    background: var(--surface-hover);
+  }
+
+  .health-score-ring strong {
+    font-family: var(--font-heading);
+    font-size: 27px;
+    line-height: 1;
+  }
+
+  .health-score-ring span {
+    margin-top: 5px;
+    color: var(--text-muted);
+    font-size: 9px;
+  }
+
+  .health-score-copy strong {
+    font-family: var(--font-heading);
+    font-size: 14px;
+  }
+
+  .health-score-copy p,
+  .insight-limitation {
+    margin-top: 6px;
+    color: var(--text-muted);
+    font-size: 10px;
+    line-height: 1.65;
+  }
+
+  .health-factors {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px 22px;
+    margin-top: 23px;
+  }
+
+  .health-factor {
+    min-width: 0;
+  }
+
+  .health-factor-label {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 10px;
+  }
+
+  .health-factor-label strong {
+    font-weight: 600;
+  }
+
+  .health-factor-label span {
+    color: var(--accent);
+    white-space: nowrap;
+  }
+
+  .health-factor-track {
+    height: 5px;
+    overflow: hidden;
+    margin-top: 7px;
+    border-radius: 10px;
+    background: var(--surface-hover);
+  }
+
+  .health-factor-fill {
+    height: 100%;
+    display: block;
+    border-radius: inherit;
+    background: var(--accent);
+  }
+
+  .health-factor p {
+    margin-top: 6px;
+    color: var(--text-muted);
+    font-size: 9px;
+    line-height: 1.55;
+  }
+
+  .health-highlights {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 20px;
+  }
+
+  .health-highlight {
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+  }
+
+  .health-highlight h4 {
+    color: var(--text-secondary);
+    font-size: 10px;
+  }
+
+  .health-highlight ul {
+    padding-left: 15px;
+    margin-top: 6px;
+    color: var(--text-muted);
+    font-size: 10px;
+  }
+
+  .activity-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .activity-metric {
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+  }
+
+  .activity-metric strong,
+  .activity-metric span {
+    display: block;
+  }
+
+  .activity-metric strong {
+    overflow-wrap: anywhere;
+    font-family: var(--font-heading);
+    font-size: 18px;
+  }
+
+  .activity-metric span {
+    margin-top: 3px;
+    color: var(--text-muted);
+    font-size: 9px;
+  }
+
+  .activity-chart {
+    min-height: 145px;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    align-items: end;
+    gap: 13px;
+    padding: 18px 10px 0;
+    margin-top: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .activity-week {
+    min-width: 0;
+    height: 125px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+
+  .activity-count,
+  .activity-week-label {
+    max-width: 100%;
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 9px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .activity-bar-track {
+    width: min(100%, 38px);
+    height: 85px;
+    display: flex;
+    align-items: flex-end;
+    overflow: hidden;
+    border-radius: 5px 5px 0 0;
+    background: var(--surface-hover);
+  }
+
+  .activity-bar {
+    width: 100%;
+    min-height: 0;
+    border-radius: 5px 5px 0 0;
+    background: var(--accent-strong);
+    transition: height 220ms ease;
+  }
+
+  .commit-list,
+  .contributor-list {
+    padding: 0;
+    margin: 0;
+    list-style: none;
+  }
+
+  .commit-item {
+    display: flex;
+    gap: 11px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .commit-marker {
+    width: 8px;
+    height: 8px;
+    flex: 0 0 8px;
+    margin-top: 5px;
+    border: 2px solid var(--accent);
+    border-radius: 50%;
+  }
+
+  .commit-content {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .commit-message {
+    overflow-wrap: anywhere;
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+
+  .commit-details {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 7px 12px;
+    margin-top: 5px;
+    color: var(--text-muted);
+    font-size: 9px;
+  }
+
+  .commit-sha,
+  .commit-sha-link {
+    font-family: var(--font-mono);
+  }
+
+  .commit-sha-link,
+  .contributor-name[href] {
+    color: var(--accent);
+  }
+
+  .commit-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 13px;
+    padding-top: 14px;
+    color: var(--text-muted);
+    font-size: 10px;
+  }
+
+  .commit-pagination button {
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text-secondary);
+    font-size: 10px;
+  }
+
+  .commit-pagination button:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+
+  .contributor-summary {
+    margin-bottom: 8px;
+    color: var(--text-muted);
+    font-size: 9px;
+  }
+
+  .contributor-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .contributor-avatar-fallback {
+    width: 30px;
+    height: 30px;
+    flex: 0 0 30px;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    border-radius: 50%;
+    background: var(--surface-hover);
+  }
+
+  .contributor-avatar-fallback img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .contributor-info {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .contributor-name,
+  .contributor-info > span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .contributor-name {
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .contributor-info > span {
+    margin-top: 3px;
+    color: var(--text-muted);
+    font-size: 9px;
+  }
+
+  .contributor-distribution {
+    width: 54px;
+    height: 5px;
+    flex: 0 0 54px;
+    overflow: hidden;
+    border-radius: 10px;
+    background: var(--surface-hover);
+  }
+
+  .contributor-distribution span {
+    height: 100%;
+    display: block;
+    border-radius: inherit;
+    background: var(--accent);
+  }
+
+  @media (max-width: 760px) {
+    .repository-insights {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .insights-section-heading,
+    .health-panel,
+    .activity-panel {
+      grid-column: auto;
+    }
+
+    .health-factors {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .insights-section-heading {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 4px;
+    }
+  }
+
+
+  /* 18. Accessibility and motion preferences
    --------------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {

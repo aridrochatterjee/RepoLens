@@ -29,7 +29,7 @@ public record Repository(
         int watchers,
 
         @JsonProperty("open_issues_count")
-        int openIssues,
+        Integer openIssues,
 
         @JsonProperty("default_branch")
         String defaultBranch,
@@ -38,6 +38,9 @@ public record Repository(
 
         @JsonProperty("created_at")
         String createdAt,
+
+        @JsonProperty("pushed_at")
+        String pushedAt,
 
         @JsonProperty("private")
         boolean isPrivate,

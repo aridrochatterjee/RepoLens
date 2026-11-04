@@ -54,6 +54,49 @@ public class GitHubApiClient {
         return getJson(endpoint, accessToken);
     }
 
+    public JsonNode getRepositoryCommitActivity(
+            String owner,
+            String repository,
+            String accessToken
+    ) {
+        URI endpoint = URI.create(
+                API_BASE_URL + "/repos/" + owner + "/" + repository
+                        + "/stats/commit_activity"
+        );
+
+        return getJson(endpoint, accessToken);
+    }
+
+    public JsonNode getRepositoryCommits(
+            String owner,
+            String repository,
+            String accessToken,
+            int page,
+            int limit
+    ) {
+        URI endpoint = URI.create(
+                API_BASE_URL + "/repos/" + owner + "/" + repository
+                        + "/commits?per_page=" + limit + "&page=" + page
+        );
+
+        return getJson(endpoint, accessToken);
+    }
+
+    public JsonNode getRepositoryContributors(
+            String owner,
+            String repository,
+            String accessToken,
+            int page,
+            int limit
+    ) {
+        URI endpoint = URI.create(
+                API_BASE_URL + "/repos/" + owner + "/" + repository
+                        + "/contributors?per_page=" + limit + "&page=" + page
+        );
+
+        return getJson(endpoint, accessToken);
+    }
+
     private JsonNode getJson(URI endpoint, String accessToken) {
         if (accessToken == null || accessToken.isBlank()) {
             throw new IllegalArgumentException(
@@ -87,6 +130,13 @@ public class GitHubApiClient {
 
                 if (status == 200) {
                     return objectMapper.readTree(response.body());
+                }
+
+                if (status == 202) {
+                    throw new GitHubApiException(
+                            "GitHub is still calculating repository activity. Try again shortly.",
+                            202
+                    );
                 }
 
                 if (status == 301 || status == 302

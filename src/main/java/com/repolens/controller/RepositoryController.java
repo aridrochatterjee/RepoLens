@@ -9,8 +9,12 @@ import com.repolens.service.RepositoryService;
 import com.sun.net.httpserver.HttpExchange;
 
 import java.io.IOException;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Set;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.function.Function;
 
 public class RepositoryController {
 
@@ -61,7 +65,6 @@ public class RepositoryController {
             sendGitHubError(exchange, exception);
 
         } catch (Exception exception) {
-            exception.printStackTrace();
             sendError(exchange, 500, "An internal server error occurred.");
         }
     }
@@ -106,8 +109,185 @@ public class RepositoryController {
             sendGitHubError(exchange, exception);
 
         } catch (Exception exception) {
-            exception.printStackTrace();
             sendError(exchange, 500, "An internal server error occurred.");
+        }
+    }
+
+    public void getRepositoryHealth(
+            HttpExchange exchange,
+            GitHubOAuthService.GitHubUser user
+    ) throws IOException {
+        handleAnalytics(
+                exchange,
+                user,
+                "/api/repository/health",
+                query -> repositoryService.analyzeHealth(
+                        requiredParameter(query, "url"),
+                        user.accessToken()
+                )
+        );
+    }
+
+    public void getRepositoryActivity(
+            HttpExchange exchange,
+            GitHubOAuthService.GitHubUser user
+    ) throws IOException {
+        handleAnalytics(
+                exchange,
+                user,
+                "/api/repository/activity",
+                query -> repositoryService.analyzeActivity(
+                        requiredParameter(query, "url"),
+                        user.accessToken(),
+                        parsePeriod(query.getOrDefault("period", "30"))
+                )
+        );
+    }
+
+    public void getRepositoryCommits(
+            HttpExchange exchange,
+            GitHubOAuthService.GitHubUser user
+    ) throws IOException {
+        handleAnalytics(
+                exchange,
+                user,
+                "/api/repository/commits",
+                query -> {
+                    Pagination pagination = parsePagination(query);
+                    return repositoryService.analyzeCommits(
+                            requiredParameter(query, "url"),
+                            user.accessToken(),
+                            pagination.page(),
+                            pagination.limit()
+                    );
+                }
+        );
+    }
+
+    public void getRepositoryContributors(
+            HttpExchange exchange,
+            GitHubOAuthService.GitHubUser user
+    ) throws IOException {
+        handleAnalytics(
+                exchange,
+                user,
+                "/api/repository/contributors",
+                query -> repositoryService.analyzeContributors(
+                        requiredParameter(query, "url"),
+                        user.accessToken()
+                )
+        );
+    }
+
+    private void handleAnalytics(
+            HttpExchange exchange,
+            GitHubOAuthService.GitHubUser user,
+            String expectedPath,
+            Function<Map<String, String>, Object> operation
+    ) throws IOException {
+        if (!exchange.getRequestMethod().equals("GET")) {
+            sendError(exchange, 405, "Method not allowed.");
+            return;
+        }
+        if (!exchange.getRequestURI().getPath().equals(expectedPath)) {
+            sendError(exchange, 404, "Endpoint not found.");
+            return;
+        }
+        if (!isAuthenticated(user)) {
+            sendError(exchange, 401, "Authentication required.");
+            return;
+        }
+
+        try {
+            Map<String, String> query = parseQuery(
+                    exchange.getRequestURI().getRawQuery()
+            );
+            validateAllowedParameters(expectedPath, query);
+            sendJson(
+                    exchange,
+                    200,
+                    operation.apply(query)
+            );
+        } catch (IllegalArgumentException exception) {
+            sendError(exchange, 400, exception.getMessage());
+        } catch (GitHubApiException exception) {
+            sendGitHubError(exchange, exception);
+        } catch (RuntimeException exception) {
+            sendError(exchange, 500, "An internal server error occurred.");
+        }
+    }
+
+    private Map<String, String> parseQuery(String rawQuery) {
+        Map<String, String> parameters = new LinkedHashMap<>();
+        if (rawQuery == null || rawQuery.isBlank()) {
+            return parameters;
+        }
+
+        for (String parameter : rawQuery.split("&", -1)) {
+            String[] parts = parameter.split("=", 2);
+            String key = URLDecoder.decode(parts[0], StandardCharsets.UTF_8);
+            String value = parts.length == 2
+                    ? URLDecoder.decode(parts[1], StandardCharsets.UTF_8)
+                    : "";
+            if (key.isBlank() || parameters.putIfAbsent(key, value) != null) {
+                throw new IllegalArgumentException(
+                        "Query parameters must have unique, non-empty names."
+                );
+            }
+        }
+        return parameters;
+    }
+
+    private String requiredParameter(
+            Map<String, String> parameters,
+            String name
+    ) {
+        String value = parameters.get(name);
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Missing required parameter: " + name + "."
+            );
+        }
+        return value;
+    }
+
+    private int parsePeriod(String value) {
+        try {
+            int period = Integer.parseInt(value);
+            if (period == 7 || period == 30 || period == 90) {
+                return period;
+            }
+        } catch (NumberFormatException ignored) {
+            // Report one consistent validation error below.
+        }
+        throw new IllegalArgumentException(
+                "Period must be 7, 30, or 90 days."
+        );
+    }
+
+    Pagination parsePagination(Map<String, String> query) {
+        int page = parseInteger(query.getOrDefault("page", "1"), "page");
+        int limit = parseInteger(query.getOrDefault("limit", "10"), "limit");
+        if (page < 1 || page > 100) {
+            throw new IllegalArgumentException(
+                    "Page must be between 1 and 100."
+            );
+        }
+        if (limit < 1 || limit > 30) {
+            throw new IllegalArgumentException(
+                    "Limit must be between 1 and 30."
+            );
+        }
+        return new Pagination(page, limit);
+    }
+
+    private int parseInteger(String value, String name) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException(
+                    name + " must be a whole number."
+            );
         }
     }
 
@@ -120,51 +300,29 @@ public class RepositoryController {
     }
 
     private String extractRepositoryUrl(String rawQuery) {
-        if (rawQuery == null || rawQuery.isBlank()) {
+        Map<String, String> query = parseQuery(rawQuery);
+        if (!Set.of("url").containsAll(query.keySet())) {
             throw new IllegalArgumentException(
-                    "Missing required parameter: url."
+                    "Unsupported query parameter."
             );
         }
+        return requiredParameter(query, "url");
+    }
 
-        String repositoryUrl = null;
-
-        for (String parameter : rawQuery.split("&")) {
-            String[] parts = parameter.split("=", 2);
-
-            String key = URLDecoder.decode(
-                    parts[0],
-                    StandardCharsets.UTF_8
-            );
-
-            if (!key.equals("url")) {
-                continue;
-            }
-
-            if (repositoryUrl != null) {
-                throw new IllegalArgumentException(
-                        "Only one repository URL is allowed."
-                );
-            }
-
-            if (parts.length != 2 || parts[1].isBlank()) {
-                throw new IllegalArgumentException(
-                        "Repository URL cannot be empty."
-                );
-            }
-
-            repositoryUrl = URLDecoder.decode(
-                    parts[1],
-                    StandardCharsets.UTF_8
-            );
-        }
-
-        if (repositoryUrl == null || repositoryUrl.isBlank()) {
+    private void validateAllowedParameters(
+            String path,
+            Map<String, String> query
+    ) {
+        Set<String> allowed = switch (path) {
+            case "/api/repository/activity" -> Set.of("url", "period");
+            case "/api/repository/commits" -> Set.of("url", "page", "limit");
+            default -> Set.of("url");
+        };
+        if (!allowed.containsAll(query.keySet())) {
             throw new IllegalArgumentException(
-                    "Missing required parameter: url."
+                    "Unsupported query parameter."
             );
         }
-
-        return repositoryUrl;
     }
 
     private void sendGitHubError(
@@ -178,12 +336,13 @@ public class RepositoryController {
         );
     }
 
-    private int mapGitHubStatus(GitHubApiException exception) {
+    int mapGitHubStatus(GitHubApiException exception) {
         return switch (exception.getStatusCode()) {
             case 401 -> 401;
             case 403 -> 403;
             case 404 -> 404;
             case 429 -> 429;
+            case 202 -> 503;
             default -> 502;
         };
     }
@@ -227,4 +386,6 @@ public class RepositoryController {
     }
 
     private record ErrorResponse(String error) {}
+
+    record Pagination(int page, int limit) {}
 }
