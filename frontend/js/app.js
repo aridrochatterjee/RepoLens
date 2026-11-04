@@ -2490,7 +2490,7 @@ async function loadSelectedFile(file, details, actions, content) {
                 || applicationState.activeWorkspace !== "code-viewer") return;
         if (handleAuthenticationExpired(response)) return;
         if (!response.ok) {
-            throw new Error(data.error || "Unable to load this file.");
+            throw new Error(sourceFileErrorMessage(response, data));
         }
         renderFileContent(data, details, actions, content);
     } catch (error) {
@@ -2501,7 +2501,7 @@ async function loadSelectedFile(file, details, actions, content) {
         const message = createElement(
             "p",
             "insight-message error",
-            error.message || "Unable to load this file."
+            error.message || "Unable to reach RepoLens. Check your connection and retry."
         );
         const retry = createElement("button", "button-secondary", "Retry");
         retry.type = "button";
@@ -2509,6 +2509,51 @@ async function loadSelectedFile(file, details, actions, content) {
         content.append(message, retry);
         details.querySelector(".file-viewer-meta").textContent = "File unavailable";
     }
+}
+
+function sourceFileErrorMessage(response, data) {
+    const messages = {
+        ENDPOINT_NOT_FOUND:
+            "The source-file API is unavailable in this RepoLens server. Restart RepoLens with the current backend, then retry.",
+        SESSION_REQUIRED:
+            "Your RepoLens session has expired. Sign in again to view this file.",
+        GITHUB_AUTHENTICATION_FAILED:
+            "GitHub could not authorize access. Sign in again and retry.",
+        FILE_NOT_FOUND:
+            "This file was not found or is not accessible at the selected branch or commit.",
+        GITHUB_PERMISSION_DENIED:
+            "GitHub denied access to this file. Check your repository permissions.",
+        RATE_LIMITED:
+            "GitHub's API rate limit was reached. Wait a little while, then retry.",
+        FILE_TOO_LARGE:
+            "This file exceeds RepoLens's source-viewer size limit. Open it on GitHub instead.",
+        UNSUPPORTED_CONTENT:
+            "GitHub returned a file format RepoLens cannot display. Open it on GitHub instead.",
+        GITHUB_TIMEOUT:
+            "The request to GitHub timed out or could not connect. Check your connection and retry.",
+        GITHUB_UNAVAILABLE:
+            "GitHub could not provide this file right now. Retry shortly.",
+        INTERNAL_ERROR:
+            "RepoLens encountered an unexpected error while loading this file. Retry shortly.",
+    };
+    if (messages[data.code]) return messages[data.code];
+    if (response.status === 404) {
+        return "The file was not found, or the source-file API route is unavailable. Restart RepoLens with the current backend, then retry.";
+    }
+    if (response.status === 401) {
+        return "Your RepoLens session has expired. Sign in again to view this file.";
+    }
+    if (response.status === 403) {
+        return "GitHub denied access to this file or its API rate limit was reached. Check permissions, then retry later.";
+    }
+    if (response.status === 413) {
+        return "This file exceeds RepoLens's source-viewer size limit. Open it on GitHub instead.";
+    }
+    if (response.status === 429) {
+        return "GitHub's API rate limit was reached. Wait a little while, then retry.";
+    }
+    if (data.error) return data.error;
+    return "RepoLens could not load this file. Check your connection and retry.";
 }
 
 function renderFileContent(file, details, actions, container) {
