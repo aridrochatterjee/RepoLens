@@ -165,6 +165,23 @@ public class RepositoryController {
         );
     }
 
+    public void getRepositoryFile(
+            HttpExchange exchange,
+            GitHubOAuthService.GitHubUser user
+    ) throws IOException {
+        handleAnalytics(
+                exchange,
+                user,
+                "/api/repository/file",
+                query -> codebaseAnalysisService.getFile(
+                        requiredParameter(query, "url"),
+                        requiredParameter(query, "path"),
+                        query.get("ref"),
+                        user.accessToken()
+                )
+        );
+    }
+
     public void getRepositoryActivity(
             HttpExchange exchange,
             GitHubOAuthService.GitHubUser user
@@ -322,6 +339,8 @@ public class RepositoryController {
             );
         } catch (IllegalArgumentException exception) {
             sendError(exchange, 400, exception.getMessage());
+        } catch (CodebaseAnalysisService.FileTooLargeException exception) {
+            sendError(exchange, 413, exception.getMessage());
         } catch (GitHubApiException exception) {
             sendGitHubError(exchange, exception);
         } catch (RuntimeException exception) {
@@ -463,6 +482,7 @@ public class RepositoryController {
                 case "/api/repository/activity" -> Set.of("url", "period");
                 case "/api/repository/commits" -> Set.of("url", "page", "limit");
                 case "/api/repository/codebase" -> Set.of("url", "limit");
+                case "/api/repository/file" -> Set.of("url", "path", "ref");
                 case "/api/repository/pull-requests",
                      "/api/repository/issues" -> Set.of(
                              "url", "period", "page", "limit"

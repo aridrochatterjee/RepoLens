@@ -135,6 +135,14 @@ public class WebServer {
             );
 
             server.createContext(
+                    "/api/repository/file",
+                    exchange -> authenticatedRepositoryInsight(
+                            exchange,
+                            repositoryController::getRepositoryFile
+                    )
+            );
+
+            server.createContext(
                     "/api/repository/contributors/",
                     exchange -> authenticatedRepositoryInsight(
                             exchange,

@@ -51,7 +51,8 @@ class RepositoryInsightsAuthenticationTest {
                 "/api/repository/pull-requests",
                 "/api/repository/issues",
                 "/api/repository/collaboration",
-                "/api/repository/codebase"
+                "/api/repository/codebase",
+                "/api/repository/file"
         }) {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(

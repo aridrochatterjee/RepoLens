@@ -1,6 +1,6 @@
 # RepoLens
 
-RepoLens is a Java 21 and vanilla JavaScript application for exploring GitHub repository metadata and development activity. It uses the JDK `HttpServer` and `HttpClient`, Jackson, Gradle, and GitHub REST API; no web framework or frontend framework is required.
+RepoLens is a Java 21 and vanilla JavaScript application for exploring GitHub repository metadata, source structure, and development activity. It uses the JDK `HttpServer` and `HttpClient`, Jackson, Gradle, and GitHub REST API; no web framework or frontend framework is required.
 
 ## RepoLens 2.0 frontend
 
@@ -8,9 +8,11 @@ The frontend is a dark-first, GitHub-inspired workspace for repository insights,
 
 - **Design system:** `frontend/css/style.css` defines shared color, typography, spacing, border, surface, elevation, transition, and layout tokens. Components use the same tokens in dark and light themes.
 - **Frontend structure:** `frontend/index.html` contains the signed-out product landing page and authenticated workspace shell. `frontend/js/app.js` handles authentication state, repository analysis, safe DOM rendering, and navigation.
-- **Navigation:** The workspace sidebar links to the repository overview and the existing analytics panels. Code intelligence views are grouped in the single tree-analysis panel; developer views are grouped in the contributor, pull-request, and issue panels.
+- **Navigation:** The signed-in shell has independent Dashboard, Repository Insights, Code Explorer, Code Composition, Directory Analysis, Contributors, Pull Requests, Issues, Collaboration, and Settings workspaces. Analytics load when a workspace is opened instead of being displayed together.
+- **Dashboard:** A concise repository header, three summary metrics, recent commits, activity trend, and language distribution. Detailed analytics live in their own workspaces.
+- **Source viewer:** Files open inside RepoLens with path metadata, safe text rendering, line numbers, lightweight syntax highlighting, copy/download actions, and a secondary GitHub link. Binary files are identified and are not returned as text.
 - **Theme:** The theme toggle switches between dark and light CSS custom-property sets. The preference is stored locally as a presentation setting; authentication tokens are never stored in browser storage.
-- **Responsive and accessible behavior:** The sidebar becomes a keyboard-operable mobile drawer, tables and analytics reflow for narrow screens, focus indicators remain visible, charts expose text descriptions, and motion is reduced when requested by the operating system.
+- **Responsive and accessible behavior:** The sidebar becomes a keyboard-operable mobile drawer, workspaces and code panels reflow for narrow screens, focus indicators remain visible, charts expose text descriptions, and motion is reduced when requested by the operating system.
 - **Dependencies:** No frontend packages, build system, or framework were added. The existing server continues to serve the static files at their existing paths.
 
 Run the frontend syntax check and backend tests with:
@@ -29,6 +31,7 @@ node --check frontend/js/app.js
 - Paginated recent commits and contributor statistics with contribution distribution.
 - Developer intelligence: a ranked contributor leaderboard, public contributor activity profiles, bounded pull-request and issue analytics, and collaboration observations grounded in returned GitHub data.
 - Code intelligence from GitHub's recursive Git Trees API: file and directory counts, file-type composition, folder exploration, largest files, and evidence-backed structural observations.
+- Authenticated in-app file viewing through the GitHub Contents API, with path/ref validation, UTF-8 and binary detection, and bounded response sizes.
 - Responsive dark and light themes.
 
 ## Run locally
@@ -56,6 +59,7 @@ Repository analytics routes require the RepoLens session cookie and accept only 
 | `GET /api/repository/issues` | `url` (required), `period` (7, 30, or 90; default 30), `page` (1–10; default 1), `limit` (1–100; default 100) | Recently updated issue entries up to the requested result limit per page, labels and resolution observations |
 | `GET /api/repository/collaboration` | `url` (required) | Bounded contributor leaderboard and contribution concentration |
 | `GET /api/repository/codebase` | `url` (required), `limit` (1–30; default 10) | One recursive tree analysis for composition, directories, explorer, largest files, and hotspots |
+| `GET /api/repository/file` | `url` and `path` (required), `ref` (optional; default branch) | Authenticated bounded text file metadata/content; binary files return metadata without content |
 
 Repository URLs are validated server-side and must be HTTPS `github.com/{owner}/{repository}` URLs. GitHub API errors are translated to safe HTTP error responses; rate limits and permission failures are surfaced rather than replaced with synthetic data.
 
@@ -102,6 +106,8 @@ Commit responses contain `repositoryFullName`, `page`, `limit`, and a `commits` 
 
 The codebase response includes availability, branch, truncation flags, summary totals, composition counts, a bounded `treeEntries` list, directory aggregates, ranked largest files, structural observations, and limitations. A missing default branch or unavailable tree returns `available: false`. A valid empty tree returns `available: true` with zero counts. GitHub's `truncated` flag is retained, and all derived totals are explicitly partial in that case. Explorer output is capped at 3,000 entries, directory results at 2,000, and largest-file results at the validated `limit` (maximum 30).
 
+The file endpoint validates repository URLs, rejects absolute paths, backslashes, empty path components, and `.` / `..` traversal segments, and validates branch/commit references before requesting GitHub. It uses the existing server-side OAuth token and never accepts a token parameter. Text files are strictly decoded as UTF-8; invalid UTF-8 or NUL-containing files are reported as binary with `content: null`. The default maximum file size is 1 MiB and can be set with `-Drepolens.maxFileBytes=<bytes>` (1 byte–10 MiB). Files over the configured limit receive HTTP `413`. GitHub requests use the existing 20-second timeout, rate-limit errors remain visible, and redirect destinations are restricted to `api.github.com`.
+
 ## Developer intelligence methodology and limitations
 
 - **Contributor leaderboard and concentration:** GitHub's Contributors API is read in at most five pages of 100 results (500 contributors). Duplicate named accounts are removed case-insensitively; GitHub's anonymous contributor entries cannot be reliably deduplicated without an identity. Ranks sort by returned contribution count. Percentages divide by the sum of those returned counts and are explicitly a subset share, not a measure of developer effort. Bot accounts are marked using GitHub's public account type or `[bot]` login suffix. GitHub may omit anonymous users and returns commit-based contribution counts, not all forms of work. Recent-activity ordering is not offered because the leaderboard endpoint does not provide comparable per-contributor timestamps.
@@ -122,7 +128,7 @@ The code intelligence endpoint fetches repository metadata once to identify its 
 - Tree exploration returns at most 3,000 path entries and is incrementally rendered in batches of 100. Directory aggregates are capped at 2,000 results. GitHub can truncate recursive trees; when it does, counts and observations cover only returned entries and must not be interpreted as complete.
 - Structural observations use explicit thresholds: more than 500 files under a directory, a file larger than 10 MiB, a file path at depth 12 or more, and a directory containing more than 50% of known blob bytes. Single-file directories and recognizable `node_modules`, `vendor`, `dist`, `build`, `target`, `coverage`, `generated`, or `.git` paths are also surfaced as observations. These are investigation prompts, not health ratings or claims of complexity/technical debt.
 
-The codebase result is produced from one tree retrieval per request and is not cached. This avoids cross-user leakage of private repository data and stale authorization-dependent entries. The API response and frontend path list are bounded for rendering, while tree parsing is limited to the entries returned by GitHub.
+The codebase result is produced from one tree retrieval per request and is not cached. This avoids cross-user leakage of private repository data and stale authorization-dependent entries. File contents are fetched only after a file is selected, are bounded by the configured maximum, and are not cached. The API response and frontend path list are bounded for rendering, while tree parsing is limited to the entries returned by GitHub.
 
 ## Health estimate methodology
 
@@ -146,6 +152,7 @@ RepoLens uses the GitHub REST API for repository metadata, languages, commit act
 
 - Configure OAuth credentials outside source control; `.env` is ignored and `.env.example` contains placeholders only.
 - API routes use the existing server-side session and do not accept tokens from query parameters.
+- File paths and references are validated server-side; source is rendered using text nodes and is never executed. Binary content is not returned as text, and code viewer downloads are generated locally from content the authenticated endpoint has already bounded.
 - The local server binds to loopback, session lifetime is enforced server-side, session cookies are `HttpOnly` and `SameSite=Lax`, and outbound GitHub requests require HTTPS and do not follow redirects to other hosts.
 - A production deployment must terminate HTTPS, set `Secure` cookies, and review CSRF protections and session storage for its deployment topology.
 - GitHub data is rendered with safe DOM APIs; external profile and commit links are restricted to HTTPS GitHub hosts.

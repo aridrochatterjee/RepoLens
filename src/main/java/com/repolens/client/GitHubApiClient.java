@@ -206,6 +206,30 @@ public class GitHubApiClient {
         return getJson(endpoint, accessToken);
     }
 
+    public JsonNode getRepositoryFile(
+            String owner,
+            String repository,
+            String path,
+            String reference,
+            String accessToken
+    ) {
+        String encodedPath = java.util.Arrays.stream(path.split("/", -1))
+                .map(segment -> URLEncoder.encode(
+                        segment,
+                        StandardCharsets.UTF_8
+                ).replace("+", "%20"))
+                .collect(java.util.stream.Collectors.joining("/"));
+        String encodedReference = URLEncoder.encode(
+                reference,
+                StandardCharsets.UTF_8
+        ).replace("+", "%20");
+        URI endpoint = URI.create(
+                API_BASE_URL + "/repos/" + owner + "/" + repository
+                        + "/contents/" + encodedPath + "?ref=" + encodedReference
+        );
+        return getJson(endpoint, accessToken);
+    }
+
     private JsonNode getJson(URI endpoint, String accessToken) {
         if (accessToken == null || accessToken.isBlank()) {
             throw new IllegalArgumentException(

@@ -219,32 +219,31 @@
         <nav class="sidebar-nav" aria-label="Repository sections">
           <div class="nav-group">
             <span class="nav-group-label">OVERVIEW</span>
-            <a class="nav-item active" href="#workspace-overview" title="Dashboard">
+            <a class="nav-item active" href="#dashboard" data-workspace="dashboard" title="Dashboard">
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1" /><rect x="14" y="4" width="6" height="4" rx="1" /><rect x="14" y="11" width="6" height="9" rx="1" /><rect x="4" y="14" width="7" height="6" rx="1" /></svg>
               <span>Dashboard</span>
-            </a>
-            <a class="nav-item" href="#repository-result" title="Repository insights" data-analysis-link hidden>
-              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v17H6.5A2.5 2.5 0 0 1 4 17.5zM4 17.5A2.5 2.5 0 0 1 6.5 15H20" /><path d="M8 7h8M8 10h6" /></svg>
-              <span>Repository insights</span>
             </a>
           </div>
 
           <div id="analysis-navigation" hidden>
             <div class="nav-group">
-              <span class="nav-group-label">CODE INTELLIGENCE</span>
-              <a class="nav-item" href="#codebase-panel" data-codebase-target="codebase-explorer" title="File explorer">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H10l2 2h7.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" /><path d="M3 9h18" /></svg>
-                <span>File explorer</span>
+              <span class="nav-group-label">REPOSITORY</span>
+              <a class="nav-item" href="#insights" data-workspace="insights" title="Repository insights">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v17H6.5A2.5 2.5 0 0 1 4 17.5zM4 17.5A2.5 2.5 0 0 1 6.5 15H20" /><path d="M8 7h8M8 10h6" /></svg>
+                <span>Repository insights</span>
               </a>
-              <a class="nav-item" href="#codebase-panel" data-codebase-target="codebase-composition" title="Code composition">
+            </div>
+            <div class="nav-group">
+              <span class="nav-group-label">CODE INTELLIGENCE</span>
+              <a class="nav-item" href="#code-explorer" data-workspace="code-explorer" title="Code explorer">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H10l2 2h7.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" /><path d="M3 9h18" /></svg>
+                <span>Code explorer</span>
+              </a>
+              <a class="nav-item" href="#code-composition" data-workspace="code-composition" title="Code composition">
                 <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5v14m0 0h16M7 15l3-4 3 2 5-7" /></svg>
                 <span>Code composition</span>
               </a>
-              <a class="nav-item" href="#codebase-panel" data-codebase-target="codebase-largest-files" title="Largest files">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 3h8l4 4v14H6zM14 3v5h5M9 13h6m-6 4h6" /></svg>
-                <span>Largest files</span>
-              </a>
-              <a class="nav-item" href="#codebase-panel" data-codebase-target="codebase-directories" title="Directory analysis">
+              <a class="nav-item" href="#directory-analysis" data-workspace="directory-analysis" title="Directory analysis">
                 <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H10l2 2h7.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5zM8 11v5m4-3v3m4-6v6" /></svg>
                 <span>Directory analysis</span>
               </a>
@@ -252,35 +251,30 @@
 
             <div class="nav-group">
               <span class="nav-group-label">DEVELOPER INTELLIGENCE</span>
-              <a class="nav-item" href="#developer-contributors" title="Contributors">
+              <a class="nav-item" href="#contributors" data-workspace="contributors" title="Contributors">
                 <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="9" cy="8" r="3" /><circle cx="17" cy="9" r="2.5" /><path d="M3.5 19a5.5 5.5 0 0 1 11 0m1-4a4 4 0 0 1 5 4" /></svg>
                 <span>Contributors</span>
               </a>
-              <a class="nav-item" href="#developer-pull-requests" title="Pull requests">
+              <a class="nav-item" href="#pull-requests" data-workspace="pull-requests" title="Pull requests">
                 <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="6" cy="6" r="2" /><circle cx="6" cy="18" r="2" /><circle cx="18" cy="18" r="2" /><path d="M6 8v8m12 0V9a3 3 0 0 0-3-3h-2m0 0 2.5-2.5M13 6l2.5 2.5" /></svg>
                 <span>Pull requests</span>
               </a>
-              <a class="nav-item" href="#developer-issues" title="Issues">
+              <a class="nav-item" href="#issues" data-workspace="issues" title="Issues">
                 <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5m0 4h.01" /></svg>
                 <span>Issues</span>
               </a>
-              <a class="nav-item" href="#developer-contributors" title="Collaboration insights">
+              <a class="nav-item" href="#collaboration" data-workspace="collaboration" title="Collaboration">
                 <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="6" cy="12" r="2" /><circle cx="18" cy="6" r="2" /><circle cx="18" cy="18" r="2" /><path d="m8 11 8-4m-8 6 8 4" /></svg>
                 <span>Collaboration</span>
               </a>
             </div>
-
-            <div class="nav-group">
-              <span class="nav-group-label">ACTIVITY</span>
-              <a class="nav-item" href="#activity-panel" title="Commit activity">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4" /></svg>
-                <span>Commit activity</span>
-              </a>
-              <a class="nav-item" href="#commits-panel" title="Recent commits">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></svg>
-                <span>Recent commits</span>
-              </a>
-            </div>
+          </div>
+          <div class="nav-group">
+            <span class="nav-group-label">PREFERENCES</span>
+            <a class="nav-item" href="#settings" data-workspace="settings" title="Settings">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.7a8 8 0 0 1-1.5.9l-.3 1.8h-2.8l-.3-1.8a8 8 0 0 1-1.5-.9l-1.7.7-1.4-2.4 1.4-1.1a7 7 0 0 1 0-1.8l-1.4-1.1 1.4-2.4 1.7.7a8 8 0 0 1 1.5-.9l.3-1.8h2.8l.3 1.8a8 8 0 0 1 1.5.9l1.7-.7 1.4 2.4-1.4 1.1a7 7 0 0 1 0 1.8Z" /></svg>
+              <span>Settings</span>
+            </a>
           </div>
         </nav>
 
@@ -361,7 +355,10 @@
               </article>
             </div>
           </section>
+
+          <section id="repository-dashboard" class="repository-dashboard" hidden></section>
         </div>
+        <section id="workspace-view" class="workspace-view" aria-live="polite" hidden></section>
       </div>
     </main>
 

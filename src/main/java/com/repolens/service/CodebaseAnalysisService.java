@@ -9,11 +9,16 @@ import com.repolens.model.DirectoryStat;
 import com.repolens.model.FileTypeStat;
 import com.repolens.model.LargestFile;
 import com.repolens.model.Repository;
+import com.repolens.model.RepositoryFile;
 import com.repolens.model.RepositoryTreeEntry;
 import com.repolens.model.StructuralHotspot;
 import com.repolens.util.RepositoryUrlParser;
 import java.net.URLEncoder;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -33,6 +38,8 @@ public class CodebaseAnalysisService {
     private static final int MAX_HOTSPOTS = 100;
     private static final long LARGE_FILE_BYTES = 10L * 1024 * 1024;
     private static final long HIGH_FILE_COUNT = 500;
+    private static final long DEFAULT_MAX_FILE_BYTES = 1024L * 1024;
+    private static final long HARD_MAX_FILE_BYTES = 10L * 1024 * 1024;
 
     private static final Map<String, String> EXTENSION_LANGUAGES = Map.ofEntries(
             Map.entry(".java", "Java"), Map.entry(".kt", "Kotlin"),
@@ -84,6 +91,7 @@ public class CodebaseAnalysisService {
 
     private final GitHubApiClient githubApiClient;
     private final RepositoryService repositoryService;
+    private final long maxFileBytes;
 
     public CodebaseAnalysisService(
             GitHubApiClient githubApiClient,
@@ -91,6 +99,197 @@ public class CodebaseAnalysisService {
     ) {
         this.githubApiClient = githubApiClient;
         this.repositoryService = repositoryService;
+        this.maxFileBytes = configuredMaxFileBytes();
+    }
+
+    public RepositoryFile getFile(
+            String repositoryUrl,
+            String path,
+            String reference,
+            String accessToken
+    ) {
+        var parsed = RepositoryUrlParser.parse(repositoryUrl);
+        String safePath = validateFilePath(path);
+        String selectedReference = reference == null || reference.isBlank()
+                ? repositoryService.analyzeRepository(
+                        repositoryUrl,
+                        accessToken
+                ).defaultBranch()
+                : validateReference(reference);
+        if (selectedReference == null || selectedReference.isBlank()) {
+            throw new IllegalArgumentException(
+                    "This repository has no default branch to inspect."
+            );
+        }
+
+        JsonNode response = githubApiClient.getRepositoryFile(
+                parsed.owner(),
+                parsed.repository(),
+                safePath,
+                selectedReference,
+                accessToken
+        );
+        if (response == null || !response.isObject()
+                || !"file".equals(response.path("type").asText())) {
+            throw new GitHubApiException(
+                    "The selected path is not a repository file.",
+                    404
+            );
+        }
+
+        long size = response.path("size").asLong(-1);
+        if (size < 0) {
+            throw new GitHubApiException(
+                    "GitHub did not return valid file size metadata.",
+                    502
+            );
+        }
+        if (size > maxFileBytes) {
+            throw new FileTooLargeException(maxFileBytes);
+        }
+
+        String encoding = response.path("encoding").asText("");
+        String encodedContent = response.path("content").asText("");
+        if (!"base64".equalsIgnoreCase(encoding)) {
+            throw new GitHubApiException(
+                    "GitHub returned an unsupported file encoding.",
+                    502
+            );
+        }
+
+        byte[] bytes;
+        try {
+            bytes = Base64.getDecoder().decode(
+                    encodedContent.replaceAll("\\s", "")
+            );
+        } catch (IllegalArgumentException exception) {
+            throw new GitHubApiException(
+                    "GitHub returned invalid file content.",
+                    502,
+                    exception
+            );
+        }
+        if (bytes.length > maxFileBytes) {
+            throw new FileTooLargeException(maxFileBytes);
+        }
+        if (bytes.length != size) {
+            throw new GitHubApiException(
+                    "GitHub file size metadata did not match its content.",
+                    502
+            );
+        }
+
+        String content = null;
+        boolean binary = containsNullByte(bytes);
+        String contentEncoding = "binary";
+        if (!binary) {
+            try {
+                content = StandardCharsets.UTF_8.newDecoder()
+                        .onMalformedInput(CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(CodingErrorAction.REPORT)
+                        .decode(ByteBuffer.wrap(bytes))
+                        .toString();
+                contentEncoding = "UTF-8";
+            } catch (CharacterCodingException exception) {
+                binary = true;
+            }
+        }
+
+        return new RepositoryFile(
+                safePath,
+                fileName(safePath),
+                size,
+                languageFor(safePath),
+                content,
+                contentEncoding,
+                binary
+        );
+    }
+
+    private long configuredMaxFileBytes() {
+        String configured = System.getProperty(
+                "repolens.maxFileBytes",
+                String.valueOf(DEFAULT_MAX_FILE_BYTES)
+        );
+        final long value;
+        try {
+            value = Long.parseLong(configured);
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException(
+                    "repolens.maxFileBytes must be a whole number.",
+                    exception
+            );
+        }
+        if (value < 1 || value > HARD_MAX_FILE_BYTES) {
+            throw new IllegalArgumentException(
+                    "repolens.maxFileBytes must be between 1 and "
+                            + HARD_MAX_FILE_BYTES + "."
+            );
+        }
+        return value;
+    }
+
+    private String validateFilePath(String path) {
+        if (path == null || path.isBlank() || path.length() > 1024
+                || path.startsWith("/") || path.endsWith("/")
+                || path.contains("\\") || path.chars().anyMatch(Character::isISOControl)) {
+            throw new IllegalArgumentException("Invalid repository file path.");
+        }
+        String[] segments = path.split("/", -1);
+        for (String segment : segments) {
+            if (segment.isBlank() || segment.equals(".") || segment.equals("..")) {
+                throw new IllegalArgumentException(
+                        "Repository file path must not contain traversal segments."
+                );
+            }
+        }
+        return String.join("/", segments);
+    }
+
+    private String validateReference(String reference) {
+        if (reference.length() > 255 || !reference.equals(reference.trim())
+                || reference.startsWith("-") || reference.endsWith("/")
+                || reference.startsWith("/") || reference.contains("//")
+                || reference.contains("..") || reference.contains("@{")
+                || reference.chars().anyMatch(Character::isISOControl)
+                || reference.chars().anyMatch(character ->
+                        " ~^:?*[\\".indexOf(character) >= 0)) {
+            throw new IllegalArgumentException("Invalid branch or commit reference.");
+        }
+        for (String segment : reference.split("/", -1)) {
+            if (segment.isEmpty() || segment.endsWith(".")
+                    || segment.endsWith(".lock")) {
+                throw new IllegalArgumentException(
+                        "Invalid branch or commit reference."
+                );
+            }
+        }
+        return reference;
+    }
+
+    private boolean containsNullByte(byte[] bytes) {
+        for (byte value : bytes) {
+            if (value == 0) return true;
+        }
+        return false;
+    }
+
+    private String languageFor(String path) {
+        String extension = extension(fileName(path));
+        return EXTENSION_LANGUAGES.get(extension);
+    }
+
+    public static final class FileTooLargeException extends RuntimeException {
+        private final long maximumBytes;
+
+        public FileTooLargeException(long maximumBytes) {
+            super("File exceeds the " + maximumBytes + " byte viewer limit.");
+            this.maximumBytes = maximumBytes;
+        }
+
+        public long maximumBytes() {
+            return maximumBytes;
+        }
     }
 
     public CodebaseAnalysis analyze(
