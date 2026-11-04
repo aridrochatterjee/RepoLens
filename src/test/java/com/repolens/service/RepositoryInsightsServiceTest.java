@@ -14,8 +14,6 @@ import com.repolens.client.GitHubApiException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -55,7 +53,7 @@ class RepositoryInsightsServiceTest {
     }
 
     @Test
-    void aggregatesFiftyTwoWeeksOfCompleteActivityForContributionHeatmaps() {
+    void preservesReturned52WeekActivityWhenTheCalendarWindowStartsEarlier() {
         github.activity = activityResponse(364, 1);
 
         var activity = service.analyzeActivity(
@@ -64,10 +62,21 @@ class RepositoryInsightsServiceTest {
                 364
         );
 
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        LocalDate firstReturnedDate = today.minusDays(
+                today.getDayOfWeek().getValue() % 7
+        ).minusWeeks(51);
+        int returnedDays = (int) (today.toEpochDay()
+                - firstReturnedDate.toEpochDay() + 1);
+
         assertTrue(activity.available());
-        assertEquals(364, activity.dailyActivity().size());
-        assertEquals(364, activity.totalCommits());
-        assertTrue(activity.weeklyActivity().size() >= 52);
+        assertEquals(returnedDays, activity.dailyActivity().size());
+        assertEquals(returnedDays, activity.totalCommits());
+        assertEquals("incomplete", activity.availabilityState());
+        assertTrue(activity.coverageNote().contains(
+                returnedDays + " of 364"
+        ));
+        assertTrue(activity.weeklyActivity().size() >= 51);
     }
 
     @Test
@@ -97,6 +106,7 @@ class RepositoryInsightsServiceTest {
         );
 
         assertFalse(activity.available());
+        assertEquals("calculating", activity.availabilityState());
         assertNull(activity.totalCommits());
         assertNull(activity.averageCommitsPerWeek());
         assertTrue(activity.dailyActivity().isEmpty());
@@ -114,7 +124,26 @@ class RepositoryInsightsServiceTest {
 
         assertFalse(activity.available());
         assertNull(activity.totalCommits());
-        assertTrue(activity.unavailableReason().contains("no usable"));
+        assertEquals("absent", activity.availabilityState());
+        assertTrue(activity.unavailableReason().contains("empty activity series"));
+    }
+
+    @Test
+    void treatsNoContentActivityResponseAsAbsentRatherThanRequestFailure() {
+        github.activityFailure = new GitHubApiException(
+                "GitHub returned no content for this analytics request.",
+                204
+        );
+
+        var activity = service.analyzeActivity(
+                REPOSITORY_URL,
+                "test-token",
+                30
+        );
+
+        assertFalse(activity.available());
+        assertEquals("absent", activity.availabilityState());
+        assertTrue(activity.unavailableReason().contains("no activity content"));
     }
 
     @Test
@@ -157,6 +186,19 @@ class RepositoryInsightsServiceTest {
         assertNull(health.factors().get(2).score());
         assertNull(health.factors().get(3).score());
         assertNull(health.factors().get(4).score());
+    }
+
+    @Test
+    void doesNotScoreAnonymousContributionRecordsAsNamedContributorDiversity() {
+        ArrayNode records = mapper.createArrayNode();
+        records.addObject().put("contributions", 21).putNull("author");
+        github.contributors = records;
+
+        var health = service.analyzeHealth(REPOSITORY_URL, "test-token");
+
+        assertNull(health.factors().get(3).score());
+        assertTrue(health.factors().get(3).explanation()
+                .contains("without account identities"));
     }
 
     @Test
@@ -227,6 +269,17 @@ class RepositoryInsightsServiceTest {
     }
 
     @Test
+    void acceptsNewGitHubRepositoryMetadataFields() {
+        var repository = service.analyzeRepository(
+                REPOSITORY_URL,
+                "test-token"
+        );
+
+        assertEquals("octocat/Hello-World", repository.fullName());
+        assertTrue(repository.pushedAt() != null);
+    }
+
+    @Test
     void sortsContributorsAndHandlesDeletedAccounts() {
         var contributors = service.analyzeContributors(
                 REPOSITORY_URL,
@@ -270,6 +323,41 @@ class RepositoryInsightsServiceTest {
     }
 
     @Test
+    void explainsWhenGitHubReturnsOnlyAnonymousContributorRecords() {
+        ArrayNode records = mapper.createArrayNode();
+        records.addObject().put("contributions", 21).putNull("author");
+        github.contributors = records;
+
+        var contributors = service.analyzeContributors(
+                REPOSITORY_URL,
+                "test-token"
+        );
+
+        assertTrue(contributors.available());
+        assertTrue(contributors.contributors().isEmpty());
+        assertEquals(21L, contributors.anonymousContributions());
+        assertTrue(contributors.limitation().contains("none contained"));
+        assertEquals("available", contributors.availabilityState());
+    }
+
+    @Test
+    void treatsNoContentContributorResponseAsAbsent() {
+        github.contributorsFailure = new GitHubApiException(
+                "GitHub returned no content for this analytics request.",
+                204
+        );
+
+        var contributors = service.analyzeContributors(
+                REPOSITORY_URL,
+                "test-token"
+        );
+
+        assertFalse(contributors.available());
+        assertEquals("absent", contributors.availabilityState());
+        assertTrue(contributors.limitation().contains("204 No Content"));
+    }
+
+    @Test
     void deduplicatesNamedContributorsAcrossBoundedPages() {
         ArrayNode duplicated = mapper.createArrayNode();
         for (int index = 0; index < 100; index++) {
@@ -297,6 +385,8 @@ class RepositoryInsightsServiceTest {
     private JsonNode repositoryResponse() {
         ObjectNode repository = mapper.createObjectNode();
         repository.put("id", 1);
+        repository.put("node_id", "R_kgDOExample");
+        repository.put("visibility", "public");
         repository.put("name", "Hello-World");
         repository.put("full_name", "octocat/Hello-World");
         repository.put("pushed_at", Instant.now().toString());
@@ -307,24 +397,27 @@ class RepositoryInsightsServiceTest {
     private JsonNode activityResponse(int periodDays, int commitsPerDay) {
         LocalDate today = LocalDate.now(ZoneOffset.UTC);
         LocalDate firstDay = today.minusDays(periodDays - 1L);
-        Map<LocalDate, int[]> weeks = new LinkedHashMap<>();
-        for (int offset = 0; offset < periodDays; offset++) {
-            LocalDate date = firstDay.plusDays(offset);
-            LocalDate sunday = date.minusDays(
-                    date.getDayOfWeek().getValue() % 7
-            );
-            int[] days = weeks.computeIfAbsent(sunday, ignored -> new int[7]);
-            int dayIndex = (int) (date.toEpochDay() - sunday.toEpochDay());
-            days[dayIndex] = commitsPerDay;
-        }
-
+        LocalDate currentSunday = today.minusDays(
+                today.getDayOfWeek().getValue() % 7
+        );
+        LocalDate firstSunday = currentSunday.minusWeeks(51);
         ArrayNode activity = mapper.createArrayNode();
-        weeks.forEach((sunday, dayCounts) -> {
+        for (int weekIndex = 0; weekIndex < 52; weekIndex++) {
+            LocalDate sunday = firstSunday.plusWeeks(weekIndex);
             ObjectNode week = activity.addObject();
             week.put("week", sunday.atStartOfDay().toEpochSecond(ZoneOffset.UTC));
             ArrayNode days = week.putArray("days");
-            for (int count : dayCounts) days.add(count);
-        });
+            int total = 0;
+            for (int dayIndex = 0; dayIndex < 7; dayIndex++) {
+                LocalDate date = sunday.plusDays(dayIndex);
+                boolean selectedDate = !date.isBefore(firstDay)
+                        && !date.isAfter(today);
+                int count = selectedDate ? commitsPerDay : 0;
+                days.add(count);
+                total += count;
+            }
+            week.put("total", total);
+        }
         return activity;
     }
 

@@ -10,5 +10,6 @@ public record ContributorStats(
         boolean available,
         boolean mayBeTruncated,
         List<ContributorStat> contributors,
-        String limitation
+        String limitation,
+        String availabilityState
 ) {}

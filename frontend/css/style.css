@@ -833,3 +833,118 @@ body.navigation-locked { overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* Observatory analytics refinement */
+.workspace-commit-controls { border-color: color-mix(in srgb, var(--accent) 34%, var(--border)); background: linear-gradient(105deg, rgb(28 29 67 / 92%), var(--surface)); }
+.workspace-commit-controls .insight-body { padding-top: 14px; }
+.analytics-controls { gap: 18px; }
+.analytics-control-label { color: #b9c4da; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+.analytics-control { min-height: 39px; border-color: #34415a; background-color: #0c121d; color: var(--text); }
+.analytics-control:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgb(119 119 255 / 12%); }
+.workspace-contribution-heatmap { position: relative; overflow: hidden; }
+.workspace-contribution-heatmap::before { content: "ACTIVITY FIELD"; position: absolute; top: 19px; right: 22px; color: rgb(167 139 250 / 55%); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 9px; font-weight: 700; letter-spacing: .16em; }
+.contribution-heatmap { padding: 12px; border: 1px solid rgb(48 59 80 / 80%); border-radius: 8px; background: radial-gradient(circle at 70% 30%, rgb(119 119 255 / 9%), transparent 48%), #0c121c; }
+.heatmap-scroll { padding: 8px; border-radius: 9px; background: linear-gradient(145deg, rgb(8 13 22 / 62%), rgb(21 28 43 / 52%)); }
+.heatmap-cell { box-shadow: inset 0 1px 0 rgb(255 255 255 / 3%); transition: transform var(--transition), filter var(--transition); }
+.heatmap-cell:not(.heatmap-outside):hover, .heatmap-cell:not(.heatmap-outside):focus-visible { outline: 1px solid #c4c4ff; outline-offset: 1px; filter: brightness(1.34); transform: scale(1.16); }
+.heatmap-cell.heat-1 { background: #242757; }
+.heatmap-cell.heat-2 { background: #45449a; }
+.heatmap-cell.heat-3 { background: #706ce6; }
+.heatmap-cell.heat-4 { background: #b39aff; box-shadow: 0 0 10px rgb(167 139 250 / 40%); }
+.workspace-commit-patterns { background: linear-gradient(145deg, rgb(16 21 33 / 98%), rgb(25 25 53 / 86%)); }
+.workspace-top-contributors { border-left: 2px solid rgb(119 119 255 / 65%); }
+.workspace-filtered-commits { margin-top: 26px; }
+.observatory-unavailable-state { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 4px 13px; align-items: start; padding: 20px; border: 1px solid rgb(78 86 133 / 42%); border-radius: 9px; background: radial-gradient(circle at 92% 10%, rgb(119 119 255 / 10%), transparent 34%), #0d1320; }
+.observatory-state-mark { display: grid; grid-row: span 4; width: 32px; height: 32px; place-items: center; border: 1px solid rgb(167 139 250 / 40%); border-radius: 50%; color: #c1b2ff; font-family: ui-monospace, monospace; font-size: 19px; }
+.observatory-unavailable-state h4 { margin: 0; color: var(--text); font-size: 13px; }
+.observatory-unavailable-state p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.observatory-state-detail { color: var(--subtle) !important; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10px !important; }
+.observatory-unavailable-state .button-secondary { width: max-content; margin-top: 8px; }
+.anonymous-contributions { grid-template-columns: 54px minmax(0, 1fr); align-items: center; border: 1px solid rgb(167 139 250 / 28%); border-left: 0; border-radius: 9px; background: linear-gradient(100deg, rgb(167 139 250 / 11%), rgb(20 26 41 / 88%) 48%); }
+.anonymous-orbit { display: grid; width: 38px; height: 38px; place-self: center; border: 1px solid rgb(167 139 250 / 68%); border-radius: 50%; box-shadow: inset 0 0 0 6px rgb(167 139 250 / 8%), 0 0 20px rgb(167 139 250 / 15%); }
+.anonymous-orbit::after { content: "?"; place-self: center; color: #cbbfff; font-family: ui-monospace, monospace; font-size: 15px; }
+.anonymous-contribution-copy { display: grid; gap: 3px; }
+.anonymous-contribution-copy strong { color: #e1dcff; }
+.anonymous-empty-state { margin-top: 12px; border-style: dashed; }
+.developer-metrics { position: relative; }
+.developer-metrics::after { content: "RETURNED DATASET"; position: absolute; right: 3px; bottom: -15px; color: var(--subtle); font-family: ui-monospace, monospace; font-size: 8px; letter-spacing: .1em; }
+.workspace-contributors-panel .developer-note { margin-top: 24px; max-width: 940px; line-height: 1.65; }
+
+@media (max-width: 560px) {
+  .workspace-contribution-heatmap::before { display: none; }
+  .observatory-unavailable-state { grid-template-columns: 30px minmax(0, 1fr); padding: 15px; }
+  .observatory-state-mark { width: 27px; height: 27px; font-size: 16px; }
+  .anonymous-contributions { grid-template-columns: 45px minmax(0, 1fr); }
+  .analytics-controls { gap: 12px; }
+}
+
+.commit-analytics-layout { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); align-items: start; gap: 18px; }
+.commit-analytics-layout > .workspace-contribution-heatmap { grid-column: 1 / -1; }
+.commit-analytics-layout > .workspace-commit-patterns, .commit-analytics-layout > .workspace-top-contributors { grid-column: span 6; }
+.commit-analytics-layout > .workspace-filtered-commits { grid-column: 1 / -1; margin-top: 0; }
+.workspace-commit-controls .insight-heading h3 { font-family: Georgia, "Times New Roman", serif; font-size: 17px; letter-spacing: -.02em; }
+.workspace-commit-controls .insight-heading p { max-width: 680px; }
+.workspace-contribution-heatmap .insight-heading h3 { font-family: Georgia, "Times New Roman", serif; font-size: 20px; letter-spacing: -.025em; }
+.workspace-contribution-heatmap .insight-body { padding: 16px; }
+.workspace-contribution-heatmap .heatmap-scroll { --heatmap-cell: 13px; --heatmap-gap: 3px; }
+.workspace-commit-patterns { background: linear-gradient(155deg, rgb(20 24 40 / 95%), rgb(17 19 31 / 98%)); }
+.workspace-top-contributors { background: linear-gradient(155deg, rgb(19 22 37 / 98%), rgb(17 19 31 / 98%)); }
+.workspace-filtered-commits .commit-filter-controls { padding: 12px; border-bottom: 1px solid var(--border); background: rgb(11 16 26 / 54%); }
+.workspace-filtered-commits .commit-history-results { padding: 4px 16px 14px; }
+.workspace-filtered-commits .commit-list { margin-top: 0; }
+.contributor-summary-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0 0 15px; }
+.contributor-summary-metric { display: grid; gap: 4px; min-width: 0; padding: 11px 12px; border-left: 1px solid rgb(139 130 255 / 54%); background: linear-gradient(110deg, rgb(124 108 255 / 9%), rgb(15 20 31 / 55%)); }
+.contributor-summary-metric strong { font-family: Georgia, "Times New Roman", serif; font-size: 20px; font-weight: 500; }
+.contributor-summary-metric span { color: var(--muted); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; }
+.contribution-distribution { margin: 15px 0 17px; }
+.contribution-distribution h4 { margin: 0; color: var(--text); font-size: 11px; }
+.contribution-distribution-note { margin: 4px 0 10px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.contribution-distribution-bar { display: flex; width: 100%; height: 11px; overflow: hidden; border: 1px solid rgb(143 152 184 / 25%); border-radius: 99px; background: var(--surface-muted); }
+.contribution-distribution-segment { min-width: 2px; height: 100%; border-right: 1px solid rgb(10 13 22 / 65%); }
+.distribution-named-0 { background: #8584ff; }
+.distribution-named-1 { background: #b19aff; }
+.distribution-named-2 { background: #6ea7ff; }
+.distribution-named-3 { background: #8d78d9; }
+.distribution-named-4 { background: #54b7c9; }
+.distribution-named-5 { background: #d29fea; }
+.distribution-other { background: #6b7391; }
+.distribution-anonymous { background: repeating-linear-gradient(135deg, #bf9aff 0 4px, #694d9c 4px 8px); }
+.contribution-distribution-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 6px 12px; margin: 10px 0 0; padding: 0; list-style: none; }
+.contribution-distribution-item { display: grid; grid-template-columns: 9px minmax(0, 1fr) auto; align-items: center; gap: 7px; color: var(--muted); font-size: 9px; }
+.contribution-distribution-item strong { color: var(--text); font-weight: 600; }
+.contribution-distribution-swatch { width: 8px; height: 8px; border-radius: 2px; }
+.commit-contributor-list { grid-template-columns: 1fr; gap: 0; }
+.commit-contributor-item { display: grid; grid-template-columns: 31px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-width: 0; padding: 9px 5px; }
+.commit-contributor-rank { color: var(--subtle); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
+.commit-contributor-item.rank-1 .commit-contributor-rank { color: #e2ca8b; }
+.commit-contributor-item.rank-2 .commit-contributor-rank { color: #c1c8d8; }
+.commit-contributor-item.rank-3 .commit-contributor-rank { color: #cd9c7d; }
+.commit-contributor-select { justify-self: start; max-width: 100%; overflow-wrap: anywhere; font-weight: 650; }
+.commit-contributor-count { color: var(--muted); font-size: 10px; text-align: right; }
+.heatmap-cell.heat-0 { background: #151d2b; }
+.heatmap-cell.heatmap-unknown { border: 1px dashed #64718a; background: repeating-linear-gradient(135deg, rgb(133 148 179 / 8%) 0 2px, transparent 2px 5px); }
+.heatmap-legend .heatmap-unknown { display: inline-block; }
+.coverage-note { padding-left: 10px; border-left: 2px solid rgb(167 139 250 / 65%); line-height: 1.55; }
+.anonymous-empty-state.identity-unavailable { border-color: rgb(167 139 250 / 56%); background: radial-gradient(circle at 8% 50%, rgb(167 139 250 / 11%), transparent 50%), #0d1320; }
+.anonymous-empty-state .button-secondary { width: max-content; margin-top: 7px; }
+.contributor-unavailable-state { margin: 4px 0; }
+
+[data-theme="light"] .observatory-unavailable-state,
+[data-theme="light"] .anonymous-empty-state.identity-unavailable { background: radial-gradient(circle at 90% 10%, rgb(119 119 255 / 9%), transparent 38%), var(--surface); }
+[data-theme="light"] .workspace-commit-patterns,
+[data-theme="light"] .workspace-top-contributors { background: var(--surface); }
+[data-theme="light"] .workspace-filtered-commits .commit-filter-controls { background: var(--surface-muted); }
+[data-theme="light"] .contributor-summary-metric { background: linear-gradient(110deg, rgb(124 108 255 / 7%), var(--surface)); }
+[data-theme="light"] .heatmap-cell.heat-0 { background: #edf0f7; }
+
+@media (max-width: 900px) {
+  .commit-analytics-layout > .workspace-commit-patterns,
+  .commit-analytics-layout > .workspace-top-contributors { grid-column: 1 / -1; }
+}
+
+@media (max-width: 560px) {
+  .contributor-summary-metrics { grid-template-columns: 1fr; }
+  .workspace-contribution-heatmap .insight-body { padding: 12px; }
+  .workspace-filtered-commits .commit-filter-controls { padding: 10px; }
+  .workspace-filtered-commits .commit-history-results { padding-right: 10px; padding-left: 10px; }
+}

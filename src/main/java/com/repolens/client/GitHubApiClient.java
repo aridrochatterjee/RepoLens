@@ -116,12 +116,23 @@ public class GitHubApiClient {
             int page,
             int limit
     ) {
-        URI endpoint = URI.create(
-                API_BASE_URL + "/repos/" + owner + "/" + repository
-                        + "/contributors?per_page=" + limit + "&page=" + page
+        return getJson(
+                repositoryContributorsEndpoint(owner, repository, page, limit),
+                accessToken
         );
+    }
 
-        return getJson(endpoint, accessToken);
+    static URI repositoryContributorsEndpoint(
+            String owner,
+            String repository,
+            int page,
+            int limit
+    ) {
+        return URI.create(
+                API_BASE_URL + "/repos/" + owner + "/" + repository
+                        + "/contributors?anon=true&per_page=" + limit
+                        + "&page=" + page
+        );
     }
 
     public JsonNode getRepositoryPullRequests(
@@ -306,6 +317,13 @@ public class GitHubApiClient {
                     throw new GitHubApiException(
                             "GitHub is still calculating repository activity. Try again shortly.",
                             202
+                    );
+                }
+
+                if (status == 204) {
+                    throw new GitHubApiException(
+                            "GitHub returned no content for this analytics request.",
+                            204
                     );
                 }
 

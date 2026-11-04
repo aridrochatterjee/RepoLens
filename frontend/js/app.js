@@ -896,10 +896,15 @@ function renderSettingsWorkspace() {
     elements.workspacePage.append(section);
 }
 
-function createWorkspacePanel(className, title, description) {
+function createWorkspacePanel(
+    className,
+    title,
+    description,
+    parent = elements.workspacePage
+) {
     const panel = createInsightPanel(className, title, description);
     panel.panel.classList.add("workspace-panel");
-    elements.workspacePage.append(panel.panel);
+    parent.append(panel.panel);
     return panel.body;
 }
 
@@ -968,12 +973,56 @@ function loadCodebaseWorkspace(body, mode) {
     });
 }
 
+function loadContributorData(container, renderer) {
+    const requestId = analysisRequestId;
+    const retry = () => {
+        applicationState.workspaceData.delete("contributors");
+        load();
+    };
+    const load = () => {
+        if (applicationState.workspaceData.has("contributors")) {
+            renderer(
+                container,
+                applicationState.workspaceData.get("contributors"),
+                retry
+            );
+            return;
+        }
+
+        container.setAttribute("aria-busy", "true");
+        container.replaceChildren(
+            createElement("p", "insight-loading", "Loading GitHub contributor statistics…")
+        );
+        void requestInsight(
+            CONFIG.endpoints.contributors,
+            applicationState.repositoryUrl,
+            requestId
+        ).then((data) => {
+            if (!data || requestId !== analysisRequestId) return;
+            applicationState.workspaceData.set("contributors", data);
+            renderer(container, data, retry);
+        }).catch((error) => {
+            if (requestId !== analysisRequestId) return;
+            console.error("Unable to load contributors:", error);
+            renderContributorUnavailableState(
+                container,
+                error.message || "Unable to load contributor statistics.",
+                retry,
+                "error"
+            );
+        });
+    };
+    load();
+}
+
 function loadCommitAnalyticsWorkspace() {
     const controls = createWorkspacePanel(
         "workspace-commit-controls",
         "Activity scope",
         "Repository activity comes from GitHub statistics; contributor activity is based on a bounded commit sample."
     );
+    const analyticsLayout = createElement("div", "commit-analytics-layout");
+    elements.workspacePage.append(analyticsLayout);
     const activityContributor = createElement("select", "analytics-control");
     activityContributor.setAttribute("aria-label", "Heatmap contributor");
     activityContributor.append(new Option("All contributors", ""));
@@ -996,22 +1045,26 @@ function loadCommitAnalyticsWorkspace() {
     const heatmap = createWorkspacePanel(
         "workspace-contribution-heatmap",
         "Contribution heatmap",
-        "Each square is a UTC date. Hover or focus a square for its commit count."
+        "Each square is a UTC date. Blank data marks are not interpreted as zero commits.",
+        analyticsLayout
     );
     const patterns = createWorkspacePanel(
         "workspace-commit-patterns",
         "Commit frequency",
-        "Weekly, monthly, and weekday counts use the selected activity data; frequency is not a measure of quality or productivity."
+        "Counts use dates returned by GitHub; frequency is not a measure of quality or productivity.",
+        analyticsLayout
     );
     const contributors = createWorkspacePanel(
         "workspace-top-contributors",
         "Most active contributors",
-        "GitHub contribution counts for returned contributors; this is not a performance ranking."
+        "Named GitHub accounts are ranked by returned contributions, not individual effort.",
+        analyticsLayout
     );
     const history = createWorkspacePanel(
         "workspace-filtered-commits",
         "Commit history",
-        "Filter GitHub's commit list by author and date. Results are paginated."
+        "Filter GitHub's commit list by author and date. Results are paginated.",
+        analyticsLayout
     );
 
     const historyFilters = createElement("div", "commit-filter-controls");
@@ -1121,21 +1174,23 @@ function loadCommitAnalyticsWorkspace() {
                         "Select “All contributors” to view repository-wide monthly and weekday patterns."
                     );
                 } else {
-                    renderCommitHeatmap(heatmap, data);
-                    renderCommitPatterns(patterns, data);
+                    renderCommitHeatmap(heatmap, data, loadActivity);
+                    renderCommitPatterns(patterns, data, loadActivity);
                 }
             })
             .catch((error) => {
                 if (requestId !== analysisRequestId
                         || currentRequest !== activityRequest) return;
-                setInsightMessage(
+                renderActivityUnavailableState(
                     heatmap,
                     error.message || "Unable to load contribution activity.",
+                    loadActivity,
                     "error"
                 );
-                setInsightMessage(
+                renderActivityUnavailableState(
                     patterns,
-                    "Commit frequency is unavailable.",
+                    error.message || "Commit frequency could not be loaded.",
+                    loadActivity,
                     "error"
                 );
             });
@@ -1150,16 +1205,15 @@ function loadCommitAnalyticsWorkspace() {
     loadHistory();
     loadActivity();
 
-    void loadWorkspaceData(
-        "contributors",
-        CONFIG.endpoints.contributors,
+    loadContributorData(
         contributors,
-        (target, data) => renderCommitContributorSummary(
+        (target, data, retry) => renderCommitContributorSummary(
             target,
             data,
             activityContributor,
             historyAuthor,
-            loadActivity
+            loadActivity,
+            retry
         )
     );
 }
@@ -1169,27 +1223,90 @@ function renderCommitContributorSummary(
     data,
     activitySelect,
     historySelect,
-    refreshHeatmap
+    refreshHeatmap,
+    retry
 ) {
     container.replaceChildren();
     container.setAttribute("aria-busy", "false");
     if (data.available === false) {
-        setInsightMessage(
+        renderContributorUnavailableState(
             container,
-            data.limitation || "Contributor data is unavailable."
+            data.limitation || "Contributor data is unavailable.",
+            retry,
+            data.availabilityState
         );
         return;
     }
     const contributors = Array.isArray(data.contributors)
         ? data.contributors.filter((item) => item.login)
         : [];
+    const total = data.totalContributionsReturned;
+    if (total != null) {
+        const summary = createElement("div", "contributor-summary-metrics");
+        [
+            [formatNumber(total), "returned contributions"],
+            [formatNumber(contributors.length), "named accounts"],
+            [
+                data.anonymousContributions == null
+                    ? "—" : formatNumber(data.anonymousContributions),
+                "anonymous contributions",
+            ],
+        ].forEach(([value, label]) => {
+            const metric = createElement("div", "contributor-summary-metric");
+            metric.append(createElement("strong", "", value), createElement("span", "", label));
+            summary.append(metric);
+        });
+        container.append(summary);
+        renderContributorDistribution(container, data, contributors);
+    }
+
     if (contributors.length === 0) {
-        setInsightMessage(container, "GitHub returned no named contributors.");
+        for (const select of [activitySelect, historySelect]) {
+            while (select.options.length > 1) select.remove(1);
+        }
+        const hasAnonymous = Number(data.anonymousContributions) > 0;
+        const state = createElement(
+            "section",
+            `observatory-unavailable-state anonymous-empty-state ${hasAnonymous ? "identity-unavailable" : ""}`
+        );
+        state.append(
+            createElement("span", "observatory-state-mark", hasAnonymous ? "◌" : "∿"),
+            createElement(
+                "h4",
+                "",
+                hasAnonymous
+                    ? "Contribution activity is present; identities are not"
+                    : "No named accounts can be ranked"
+            ),
+            createElement(
+                "p",
+                "",
+                hasAnonymous
+                    ? `${formatNumber(data.anonymousContributions)} contributions arrived without a GitHub account identity. They remain in the repository total; RepoLens will not guess who made them.`
+                    : "GitHub returned no named contributor records for this repository."
+            ),
+            createElement(
+                "p",
+                "observatory-state-detail",
+                "Anonymous or unlinked commit authors, deleted accounts, and GitHub's contributor-statistics limits can prevent identity mapping. Check the repository's GitHub contributor graph or retry after statistics refresh."
+            )
+        );
+        if (hasAnonymous) {
+            const retryButton = createElement("button", "button-secondary", "Refresh contributor data");
+            retryButton.type = "button";
+            retryButton.addEventListener("click", retry);
+            state.append(retryButton);
+        }
+        container.append(state);
         return;
     }
+
     const list = createElement("ol", "commit-contributor-list");
-    contributors.slice(0, 8).forEach((contributor) => {
-        const row = createElement("li", "commit-contributor-item");
+    contributors.slice(0, 8).forEach((contributor, index) => {
+        const row = createElement(
+            "li",
+            `commit-contributor-item${index < 3 ? ` rank-${index + 1}` : ""}`
+        );
         const select = createElement(
             "button",
             "commit-contributor-select",
@@ -1203,8 +1320,9 @@ function renderCommitContributorSummary(
             historySelect.dispatchEvent(new Event("change"));
         });
         row.append(
+            createElement("span", "commit-contributor-rank", `#${index + 1}`),
             select,
-            createElement("span", "", `${formatNumber(contributor.contributions)} commits`)
+            createElement("span", "commit-contributor-count", `${formatNumber(contributor.contributions)} contributions`)
         );
         list.append(row);
     });
@@ -1213,6 +1331,7 @@ function renderCommitContributorSummary(
         [activitySelect, activitySelect.value],
         [historySelect, historySelect.value],
     ]) {
+        while (select.options.length > 1) select.remove(1);
         contributors.forEach((contributor) => {
             select.append(new Option(
                 contributor.login,
@@ -1226,24 +1345,195 @@ function renderCommitContributorSummary(
         container.append(createElement(
             "p",
             "insight-limitation",
-            "GitHub contributor results are capped; this list and its ranking may be partial."
+            "GitHub contributor results are capped; rankings and distribution are partial."
         ));
     }
 }
 
-function renderCommitHeatmap(container, activity) {
+function renderContributorDistribution(container, data, contributors) {
+    if (data.mayBeTruncated) {
+        container.append(createElement(
+            "p",
+            "insight-limitation",
+            "The distribution is omitted because GitHub returned a capped contributor sample."
+        ));
+        return;
+    }
+
+    const total = Number(data.totalContributionsReturned);
+    const anonymous = Number(data.anonymousContributions);
+    if (!Number.isFinite(total) || total <= 0
+            || !Number.isFinite(anonymous) || anonymous < 0) return;
+
+    const namedTotal = contributors.reduce(
+        (sum, contributor) => sum + Math.max(0, Number(contributor.contributions) || 0),
+        0
+    );
+    if (namedTotal + anonymous !== total) {
+        container.append(createElement(
+            "p",
+            "insight-limitation",
+            "A distribution is not shown because the returned contributor totals do not reconcile."
+        ));
+        return;
+    }
+
+    const distribution = createElement("section", "contribution-distribution");
+    distribution.append(
+        createElement("h4", "", "Returned contribution distribution"),
+        createElement(
+            "p",
+            "contribution-distribution-note",
+            "Named accounts and anonymous records share the returned total; this is not a measure of effort."
+        )
+    );
+    const bar = createElement("div", "contribution-distribution-bar");
+    bar.setAttribute("role", "img");
+    bar.setAttribute(
+        "aria-label",
+        `Distribution of ${formatNumber(total)} returned contributions`
+    );
+    const segments = contributors.slice(0, 6).map((contributor, index) => ({
+        label: `@${contributor.login}`,
+        count: Math.max(0, Number(contributor.contributions) || 0),
+        className: `distribution-named distribution-named-${index % 6}`,
+    }));
+    const displayedNamed = segments.reduce(
+        (sum, segment) => sum + segment.count,
+        0
+    );
+    if (namedTotal > displayedNamed) {
+        segments.push({
+            label: "Other named accounts",
+            count: namedTotal - displayedNamed,
+            className: "distribution-other",
+        });
+    }
+    if (anonymous > 0) {
+        segments.push({
+            label: "Anonymous records",
+            count: anonymous,
+            className: "distribution-anonymous",
+        });
+    }
+
+    const legend = createElement("ul", "contribution-distribution-legend");
+    segments.forEach((segment) => {
+        const part = createElement(
+            "span",
+            `contribution-distribution-segment ${segment.className}`
+        );
+        part.style.width = `${segment.count / total * 100}%`;
+        part.title = `${segment.label}: ${formatNumber(segment.count)} contributions`;
+        part.setAttribute("aria-hidden", "true");
+        bar.append(part);
+
+        const item = createElement("li", "contribution-distribution-item");
+        item.append(
+            createElement("span", `contribution-distribution-swatch ${segment.className}`),
+            createElement("span", "", segment.label),
+            createElement("strong", "", formatNumber(segment.count))
+        );
+        legend.append(item);
+    });
+    distribution.append(bar, legend);
+    container.append(distribution);
+}
+
+function renderContributorUnavailableState(
+    container,
+    message,
+    retry,
+    availabilityState = "error"
+) {
+    container.replaceChildren();
+    container.setAttribute("aria-busy", "false");
+    const state = createElement(
+        "section",
+        "observatory-unavailable-state contributor-unavailable-state"
+    );
+    const title = availabilityState === "calculating"
+        ? "GitHub is preparing contributor statistics"
+        : availabilityState === "absent"
+            ? "No contributor statistics were returned"
+            : "Contributor identities are unavailable";
+    const detail = availabilityState === "calculating"
+        ? "GitHub calculates contributor statistics asynchronously. Wait briefly, then retry; RepoLens does not poll indefinitely."
+        : availabilityState === "absent"
+            ? "No contribution totals were supplied for this repository. This is different from a confirmed zero total."
+            : "Check repository access and GitHub API limits. When records are anonymous, identities cannot be recovered from contribution counts alone.";
+    state.append(
+        createElement("span", "observatory-state-mark", "◌"),
+        createElement("h4", "", title),
+        createElement("p", "", message),
+        createElement("p", "observatory-state-detail", detail)
+    );
+    if (typeof retry === "function") {
+        const button = createElement("button", "button-secondary", "Retry contributor data");
+        button.type = "button";
+        button.addEventListener("click", retry);
+        state.append(button);
+    }
+    container.append(state);
+}
+
+function renderActivityUnavailableState(
+    container,
+    message,
+    retry,
+    availabilityState = "error"
+) {
+    container.replaceChildren();
+    container.setAttribute("aria-busy", "false");
+    const state = createElement("section", "observatory-unavailable-state");
+    const title = availabilityState === "calculating"
+        ? "GitHub is preparing this activity signal"
+        : availabilityState === "absent"
+            ? "No activity statistics were returned"
+            : availabilityState === "incomplete"
+                ? "The activity window is incomplete"
+                : "Activity signal unavailable";
+    const detail = availabilityState === "calculating"
+        ? "GitHub builds repository statistics asynchronously. Wait briefly, then retry; RepoLens will not keep polling."
+        : availabilityState === "absent"
+            ? "GitHub returned no statistics for this request. That is not proof that the repository has no commits."
+            : availabilityState === "incomplete"
+                ? "GitHub's weekly response did not cover this selected date range. Missing dates are not interpreted as zero."
+                : "Check repository access and GitHub API limits, then retry the request.";
+    state.append(
+        createElement("span", "observatory-state-mark", "∿"),
+        createElement("h4", "", title),
+        createElement("p", "", message),
+        createElement("p", "observatory-state-detail", detail)
+    );
+    if (typeof retry === "function") {
+        const button = createElement("button", "button-secondary", "Retry activity data");
+        button.type = "button";
+        button.addEventListener("click", retry);
+        state.append(button);
+    }
+    container.append(state);
+}
+
+function renderCommitHeatmap(container, activity, retry) {
     if (!activity.available) {
-        setInsightMessage(
+        renderActivityUnavailableState(
             container,
-            activity.unavailableReason || "GitHub has no complete activity data for this period."
+            activity.unavailableReason || "GitHub has no complete activity data for this period.",
+            retry,
+            activity.availabilityState
         );
         return;
     }
+    const dates = activity.dailyActivity || [];
     renderCalendarHeatmap(
         container,
-        activity.dailyActivity,
-        `Repository activity · last ${activity.periodDays} days`,
-        false
+        dates,
+        dates.length > 0
+            ? `Repository activity · ${dates[0].date} to ${dates.at(-1).date}`
+            : "Repository activity",
+        false,
+        activity.coverageNote
     );
 }
 
@@ -1262,23 +1552,38 @@ function renderContributorCommitHeatmap(
             counts.set(day, (counts.get(day) || 0) + 1);
         }
     });
+    const partial = (commitPage.commits || []).length >= 100;
     const first = new Date(`${since}T00:00:00Z`);
     const dailyActivity = [];
     for (let offset = 0; offset < periodDays; offset++) {
         const date = new Date(first);
         date.setUTCDate(first.getUTCDate() + offset);
         const key = date.toISOString().slice(0, 10);
-        dailyActivity.push({ date: key, commits: counts.get(key) || 0 });
+        dailyActivity.push({
+            date: key,
+            commits: partial
+                ? counts.get(key) ?? null
+                : counts.get(key) || 0,
+        });
     }
     renderCalendarHeatmap(
         container,
         dailyActivity,
-        `@${username} · commits returned in the last ${periodDays} days`,
-        (commitPage.commits || []).length >= 100
+        `@${username} · returned commits in the last ${periodDays} days`,
+        partial,
+        partial
+            ? "GitHub returned a capped sample of 100 commits. Counts are limited to that sample; dates without returned commits are unknown, not zero."
+            : null
     );
 }
 
-function renderCalendarHeatmap(container, activity, label, partial) {
+function renderCalendarHeatmap(
+    container,
+    activity,
+    label,
+    partial,
+    coverageNote = null
+) {
     const values = Array.isArray(activity) ? activity : [];
     if (values.length === 0) {
         setInsightMessage(container, "No contribution dates are available.");
@@ -1287,7 +1592,10 @@ function renderCalendarHeatmap(container, activity, label, partial) {
     container.replaceChildren();
     container.setAttribute("aria-busy", "false");
     container.append(createElement("p", "heatmap-title", label));
-    const counts = new Map(values.map((item) => [item.date, Number(item.commits) || 0]));
+    const counts = new Map(values.map((item) => [
+        item.date,
+        item.commits == null ? null : Number(item.commits) || 0,
+    ]));
     const dates = values.map((item) => new Date(`${item.date}T00:00:00Z`));
     const first = new Date(dates[0]);
     first.setUTCDate(first.getUTCDate() - first.getUTCDay());
@@ -1324,9 +1632,17 @@ function renderCalendarHeatmap(container, activity, label, partial) {
             const key = date.toISOString().slice(0, 10);
             const count = counts.get(key);
             const cell = createElement("span", "heatmap-cell");
-            if (count === undefined) {
-                cell.classList.add("heatmap-outside");
-                cell.setAttribute("aria-hidden", "true");
+            if (count == null) {
+                if (key >= values[0].date && key <= values.at(-1).date) {
+                    cell.classList.add("heatmap-unknown");
+                    cell.title = `No activity data returned for ${key}`;
+                    cell.setAttribute("role", "img");
+                    cell.setAttribute("aria-label", cell.title);
+                    cell.tabIndex = 0;
+                } else {
+                    cell.classList.add("heatmap-outside");
+                    cell.setAttribute("aria-hidden", "true");
+                }
             } else {
                 const intensity = count === 0 || max === 0
                     ? 0
@@ -1350,7 +1666,17 @@ function renderCalendarHeatmap(container, activity, label, partial) {
         legend.append(swatch);
     }
     legend.append(createElement("span", "", "More"));
+    const unknownSwatch = createElement("span", "heatmap-cell heatmap-unknown");
+    unknownSwatch.setAttribute("aria-hidden", "true");
+    legend.append(unknownSwatch, createElement("span", "", "Not returned"));
     container.append(legend);
+    if (coverageNote) {
+        container.append(createElement(
+            "p",
+            "insight-limitation coverage-note",
+            coverageNote
+        ));
+    }
     if (partial) {
         container.append(createElement(
             "p",
@@ -1360,11 +1686,13 @@ function renderCalendarHeatmap(container, activity, label, partial) {
     }
 }
 
-function renderCommitPatterns(container, activity) {
+function renderCommitPatterns(container, activity, retry) {
     if (!activity.available) {
-        setInsightMessage(
+        renderActivityUnavailableState(
             container,
-            activity.unavailableReason || "Commit frequency is unavailable."
+            activity.unavailableReason || "Commit frequency is unavailable.",
+            retry,
+            activity.availabilityState
         );
         return;
     }
@@ -1441,8 +1769,15 @@ function renderCommitPatterns(container, activity) {
     container.prepend(createElement(
         "p",
         "activity-summary",
-        `${formatNumber(total)} commits in the complete ${activity.periodDays}-day GitHub statistics window.`
+        `${formatNumber(total)} commits across ${formatNumber(days.length)} returned dates.`
     ));
+    if (activity.coverageNote) {
+        container.append(createElement(
+            "p",
+            "insight-limitation coverage-note",
+            activity.coverageNote
+        ));
+    }
 }
 
 function loadWorkspaceContent(workspace) {
@@ -1468,7 +1803,32 @@ function loadWorkspaceContent(workspace) {
             "Recent changes on the default branch."
         );
         void loadWorkspaceData("health", CONFIG.endpoints.health, health, renderHealth);
-        void loadWorkspaceData("activity", CONFIG.endpoints.activity, activity, renderActivity);
+        const loadActivity = () => {
+            applicationState.workspaceData.delete("activity");
+            const requestId = analysisRequestId;
+            activity.setAttribute("aria-busy", "true");
+            activity.replaceChildren(
+                createElement("p", "insight-loading", "Loading GitHub activity…")
+            );
+            void requestInsight(
+                CONFIG.endpoints.activity,
+                applicationState.repositoryUrl,
+                requestId
+            ).then((data) => {
+                if (!data || requestId !== analysisRequestId) return;
+                applicationState.workspaceData.set("activity", data);
+                renderActivity(activity, data, loadActivity);
+            }).catch((error) => {
+                if (requestId !== analysisRequestId) return;
+                renderActivityUnavailableState(
+                    activity,
+                    error.message || "Unable to load commit activity.",
+                    loadActivity,
+                    "error"
+                );
+            });
+        };
+        loadActivity();
         void loadCommitPage(commits, applicationState.repositoryUrl, 1, analysisRequestId);
         return;
     }
@@ -1526,16 +1886,15 @@ function loadWorkspaceContent(workspace) {
             profiles,
             "Select a contributor from the leaderboard to load their public activity."
         );
-        void loadWorkspaceData(
-            "contributors",
-            CONFIG.endpoints.contributors,
+        loadContributorData(
             leaderboard,
-            (target, data) => renderDeveloperContributors(
+            (target, data, retry) => renderDeveloperContributors(
                 target,
                 data,
                 applicationState.repositoryUrl,
                 analysisRequestId,
-                profiles
+                profiles,
+                retry
             )
         );
         return;
@@ -1642,6 +2001,27 @@ async function loadOverview(repositoryUrl, requestId, panels) {
     const pullRequestMetric = elements.repositoryDashboard.querySelector('[data-metric="open-prs"] strong');
     const issueMetric = elements.repositoryDashboard.querySelector('[data-metric="open-issues"] strong');
     const languageMetric = elements.repositoryDashboard.querySelector('[data-metric="languages"] strong');
+    const loadOverviewActivity = () => loadOverviewResource(
+        CONFIG.endpoints.activity,
+        repositoryUrl,
+        requestId
+    ).then((data) => {
+        if (!data || requestId !== analysisRequestId) return;
+        if (commitMetric) {
+            commitMetric.textContent = data.totalCommits == null
+                ? "—"
+                : formatNumber(data.totalCommits);
+        }
+        renderActivity(panels.activity, data, loadOverviewActivity);
+    }).catch((error) => {
+        if (requestId !== analysisRequestId) return;
+        renderActivityUnavailableState(
+            panels.activity,
+            error.message || "Unable to load commit activity.",
+            loadOverviewActivity,
+            "error"
+        );
+    });
     const resources = [
         loadOverviewResource(CONFIG.endpoints.health, repositoryUrl, requestId)
             .then((data) => {
@@ -1652,17 +2032,7 @@ async function loadOverview(repositoryUrl, requestId, panels) {
                 }
             })
             .catch((error) => showOverviewMetricError(healthMetric, error, requestId)),
-        loadOverviewResource(CONFIG.endpoints.activity, repositoryUrl, requestId)
-            .then((data) => {
-                if (!data || requestId !== analysisRequestId) return;
-                if (commitMetric) {
-                    commitMetric.textContent = data.totalCommits == null
-                        ? "—"
-                        : formatNumber(data.totalCommits);
-                }
-                renderActivity(panels.activity, data);
-            })
-            .catch((error) => showOverviewError(panels.activity, error, requestId)),
+        loadOverviewActivity(),
         loadOverviewResource(CONFIG.endpoints.languages, repositoryUrl, requestId)
             .then((data) => {
                 if (!data || requestId !== analysisRequestId) return;
@@ -1982,22 +2352,34 @@ function createHighlightList(title, values) {
     return group;
 }
 
-function renderActivity(container, activity) {
+function renderActivity(container, activity, retry = null) {
     container.replaceChildren();
     container.setAttribute("aria-busy", "false");
     if (!activity.available) {
-        setInsightMessage(
+        renderActivityUnavailableState(
             container,
-            activity.unavailableReason || "Commit activity is not available yet."
+            activity.unavailableReason || "Commit activity is not available yet.",
+            retry,
+            activity.availabilityState
         );
         return;
     }
 
     const metrics = createElement("div", "activity-metrics");
+    const partial = activity.availabilityState === "incomplete";
     [
-        [formatNumber(activity.totalCommits), "commits in period"],
-        [Number(activity.averageCommitsPerWeek).toFixed(1), "average per week"],
-        [activity.mostActiveDay || "—", "most active day"],
+        [
+            formatNumber(activity.totalCommits),
+            partial ? "commits on returned dates" : "commits in period",
+        ],
+        [
+            Number(activity.averageCommitsPerWeek).toFixed(1),
+            partial ? "average per observed week" : "average per week",
+        ],
+        [
+            activity.mostActiveDay || "—",
+            partial ? "most active observed day" : "most active day",
+        ],
     ].forEach(([value, label]) => {
         const metric = createElement("div", "activity-metric");
         metric.append(
@@ -2048,6 +2430,39 @@ function renderActivity(container, activity) {
         chart.append(item);
     });
     container.append(chart);
+    if (activity.coverageNote) {
+        container.append(createElement(
+            "p",
+            "insight-limitation coverage-note",
+            activity.coverageNote
+        ));
+    }
+}
+
+function renderCommitHistoryUnavailable(container, message, retry) {
+    container.replaceChildren();
+    container.setAttribute("aria-busy", "false");
+    const state = createElement(
+        "section",
+        "observatory-unavailable-state commit-history-empty-state"
+    );
+    state.append(
+        createElement("span", "observatory-state-mark", "⌁"),
+        createElement("h4", "", "Commit history could not be loaded"),
+        createElement("p", "", message),
+        createElement(
+            "p",
+            "observatory-state-detail",
+            "Check repository access and the selected author/date filters, then retry."
+        )
+    );
+    if (typeof retry === "function") {
+        const button = createElement("button", "button-secondary", "Retry commit history");
+        button.type = "button";
+        button.addEventListener("click", retry);
+        state.append(button);
+    }
+    container.append(state);
 }
 
 function renderCommits(container, data, repositoryUrl, requestId, filters = {}) {
@@ -2055,7 +2470,35 @@ function renderCommits(container, data, repositoryUrl, requestId, filters = {}) 
     container.setAttribute("aria-busy", "false");
     const commits = Array.isArray(data.commits) ? data.commits : [];
     if (commits.length === 0) {
-        setInsightMessage(container, "No commits were returned for this page.");
+        const hasFilters = Object.keys(filters).some((key) => filters[key]);
+        const state = createElement(
+            "section",
+            "observatory-unavailable-state commit-history-empty-state"
+        );
+        state.append(
+            createElement("span", "observatory-state-mark", "⌁"),
+            createElement(
+                "h4",
+                "",
+                hasFilters ? "No commits match these filters" : "No commits on this page"
+            ),
+            createElement(
+                "p",
+                "",
+                hasFilters
+                    ? "The selected author and date range returned no commits. This does not change repository-wide contribution totals."
+                    : "GitHub returned no commit entries for this page. The repository may have no accessible history."
+            )
+        );
+        if (hasFilters) {
+            const clear = createElement("button", "button-secondary", "Clear commit filters");
+            clear.type = "button";
+            clear.addEventListener("click", () => {
+                loadCommitPage(container, repositoryUrl, 1, requestId, {});
+            });
+            state.append(clear);
+        }
+        container.append(state);
         return;
     }
 
@@ -2116,14 +2559,23 @@ function renderDeveloperContributors(
     data,
     repositoryUrl,
     requestId,
-    profileContainer
+    profileContainer,
+    retry
 ) {
     container.replaceChildren();
     container.setAttribute("aria-busy", "false");
     if (data.available === false) {
-        setInsightMessage(
+        renderContributorUnavailableState(
             container,
-            data.limitation || "Contributor collaboration data is unavailable."
+            data.limitation || "Contributor collaboration data is unavailable.",
+            retry,
+            data.availabilityState
+        );
+        profileContainer.replaceChildren();
+        profileContainer.setAttribute("aria-busy", "false");
+        setInsightMessage(
+            profileContainer,
+            "Contributor profiles are unavailable until GitHub returns named accounts."
         );
         return;
     }
@@ -2158,6 +2610,7 @@ function renderDeveloperContributors(
         metrics.append(metric);
     });
     container.append(metrics);
+    renderContributorDistribution(container, data, contributors);
     if (Array.isArray(data.observations) && data.observations.length > 0) {
         const observations = createElement("ul", "collaboration-observations");
         data.observations.forEach((observation) => {
@@ -2178,25 +2631,69 @@ function renderDeveloperContributors(
     );
     container.append(note);
     if (anonymousContributions != null && anonymousContributions > 0) {
-        const anonymous = createElement("p", "anonymous-contributions");
-        anonymous.append(
-            createElement("strong", "", "Anonymous contributions"),
+        const anonymous = createElement("section", "anonymous-contributions");
+        const visual = createElement("span", "anonymous-orbit");
+        visual.setAttribute("aria-hidden", "true");
+        const copy = createElement("div", "anonymous-contribution-copy");
+        copy.append(
+            createElement("strong", "", "Anonymous contribution signal"),
             createElement(
                 "span",
                 "",
-                `${formatNumber(anonymousContributions)} contributions from GitHub records without an available username. No identity is inferred.`
+                `${formatNumber(anonymousContributions)} contribution${anonymousContributions === 1 ? "" : "s"} arrived without a GitHub account identity.`
             )
         );
+        anonymous.append(visual, copy);
         container.append(anonymous);
     }
     if (contributors.length === 0) {
-        container.append(createElement(
-            "p",
-            "insight-message",
-            anonymousContributions > 0
-                ? "No named contributors are available to rank. Anonymous contributions remain included in the repository total above."
-                : "GitHub returned no named contributors for this repository."
-        ));
+        const empty = createElement("section", "observatory-unavailable-state anonymous-empty-state");
+        const hasAnonymous = Number(anonymousContributions) > 0;
+        empty.append(
+            createElement("span", "observatory-state-mark", "◌"),
+            createElement(
+                "h4",
+                "",
+                hasAnonymous
+                    ? "Contribution activity is present; identities are not"
+                    : "No named accounts can be ranked"
+            ),
+            createElement(
+                "p",
+                "",
+                hasAnonymous
+                    ? `${formatNumber(anonymousContributions)} contributions arrived without a GitHub account identity. RepoLens keeps them in the repository total and deliberately does not guess usernames.`
+                    : "GitHub did not return named contributor identities for this repository."
+            ),
+            createElement(
+                "p",
+                "observatory-state-detail",
+                "GitHub may be unable to map email-only, deleted, or unlinked authors to accounts. Check the repository's contributor graph or retry after GitHub refreshes its statistics."
+            )
+        );
+        if (hasAnonymous) {
+            const retryButton = createElement("button", "button-secondary", "Refresh contributor data");
+            retryButton.type = "button";
+            retryButton.addEventListener("click", retry);
+            empty.append(retryButton);
+        }
+        container.append(empty);
+        profileContainer.replaceChildren();
+        profileContainer.setAttribute("aria-busy", "false");
+        const profileState = createElement(
+            "section",
+            "observatory-unavailable-state anonymous-empty-state"
+        );
+        profileState.append(
+            createElement("span", "observatory-state-mark", "◌"),
+            createElement("h4", "", "No profile activity to request"),
+            createElement(
+                "p",
+                "",
+                "GitHub contributor profiles require a named account. Anonymous contribution records remain in repository totals but cannot be mapped to a profile."
+            )
+        );
+        profileContainer.append(profileState);
         return;
     }
 
@@ -3468,14 +3965,26 @@ async function requestInsight(endpoint, repositoryUrl, requestId, parameters = {
     return data;
 }
 
-async function loadInsight(panel, endpoint, repositoryUrl, requestId, render, parameters = {}) {
+async function loadInsight(
+    panel,
+    endpoint,
+    repositoryUrl,
+    requestId,
+    render,
+    parameters = {},
+    onError = null
+) {
     try {
         const data = await requestInsight(endpoint, repositoryUrl, requestId, parameters);
         if (data && requestId === analysisRequestId) render(panel, data);
     } catch (error) {
         if (requestId !== analysisRequestId) return;
         console.error("Repository insight error:", error);
-        setInsightMessage(panel, error.message || "Unable to load this insight.", "error");
+        if (typeof onError === "function") {
+            onError(error);
+        } else {
+            setInsightMessage(panel, error.message || "Unable to load this insight.", "error");
+        }
     }
 }
 
@@ -3494,7 +4003,12 @@ async function loadCommitPage(panel, repositoryUrl, page, requestId, filters = {
             requestId,
             filters
         ),
-        { page: String(page), limit: "30", ...filters }
+        { page: String(page), limit: "30", ...filters },
+        (error) => renderCommitHistoryUnavailable(
+            panel,
+            error.message || "Unable to load commit history.",
+            () => loadCommitPage(panel, repositoryUrl, page, requestId, filters)
+        )
     );
 }
 
