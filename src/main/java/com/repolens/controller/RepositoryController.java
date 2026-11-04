@@ -12,6 +12,7 @@ import com.sun.net.httpserver.HttpExchange;
 
 import java.io.IOException;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.net.URLDecoder;
@@ -169,17 +170,139 @@ public class RepositoryController {
             HttpExchange exchange,
             GitHubOAuthService.GitHubUser user
     ) throws IOException {
-        handleAnalytics(
-                exchange,
-                user,
-                "/api/repository/file",
-                query -> codebaseAnalysisService.getFile(
-                        requiredParameter(query, "url"),
-                        requiredParameter(query, "path"),
-                        query.get("ref"),
-                        user.accessToken()
-                )
-        );
+        String endpoint = "/api/repository/file";
+        if (!exchange.getRequestMethod().equals("GET")) {
+            sendFileError(
+                    exchange,
+                    405,
+                    "METHOD_NOT_ALLOWED",
+                    "Method not allowed."
+            );
+            return;
+        }
+        if (!exchange.getRequestURI().getPath().equals(endpoint)) {
+            sendFileError(
+                    exchange,
+                    404,
+                    "ENDPOINT_NOT_FOUND",
+                    "Endpoint not found."
+            );
+            return;
+        }
+        if (!isAuthenticated(user)) {
+            sendFileError(
+                    exchange,
+                    401,
+                    "SESSION_REQUIRED",
+                    "Authentication required."
+            );
+            return;
+        }
+
+        try {
+            Map<String, String> query = parseQuery(
+                    exchange.getRequestURI().getRawQuery()
+            );
+            validateAllowedParameters(endpoint, query);
+            sendJson(exchange, 200, codebaseAnalysisService.getFile(
+                    requiredParameter(query, "url"),
+                    requiredParameter(query, "path"),
+                    query.get("ref"),
+                    user.accessToken()
+            ));
+        } catch (IllegalArgumentException exception) {
+            sendFileError(
+                    exchange,
+                    400,
+                    "INVALID_REQUEST",
+                    exception.getMessage()
+            );
+        } catch (CodebaseAnalysisService.FileTooLargeException exception) {
+            sendFileError(
+                    exchange,
+                    413,
+                    "FILE_TOO_LARGE",
+                    exception.getMessage()
+            );
+        } catch (GitHubApiException exception) {
+            sendRepositoryFileGitHubError(exchange, exception);
+        } catch (RuntimeException exception) {
+            System.err.println(
+                    "Repository file request failed unexpectedly: "
+                            + exception.getClass().getSimpleName()
+            );
+            sendFileError(
+                    exchange,
+                    500,
+                    "INTERNAL_ERROR",
+                    "An internal server error occurred."
+            );
+        }
+    }
+
+    private void sendRepositoryFileGitHubError(
+            HttpExchange exchange,
+            GitHubApiException exception
+    ) throws IOException {
+        int status = exception.getStatusCode();
+        String message = exception.getMessage();
+        if (status == 403 || status == 429) {
+            boolean rateLimited = status == 429
+                    || (message != null
+                    && message.toLowerCase(Locale.ROOT).contains("rate limit"));
+            sendFileError(
+                    exchange,
+                    rateLimited ? 429 : 403,
+                    rateLimited ? "RATE_LIMITED" : "GITHUB_PERMISSION_DENIED",
+                    rateLimited
+                            ? "GitHub's API rate limit was reached. Wait and retry."
+                            : "GitHub denied access to this file. Check repository permissions."
+            );
+        } else if (status == 401) {
+            sendFileError(
+                    exchange,
+                    401,
+                    "GITHUB_AUTHENTICATION_FAILED",
+                    "GitHub could not authorize this request. Sign in again and retry."
+            );
+        } else if (status == 404) {
+            sendFileError(
+                    exchange,
+                    404,
+                    "FILE_NOT_FOUND",
+                    "The file was not found or is not accessible at this reference."
+            );
+        } else if (status == 0) {
+            sendFileError(
+                    exchange,
+                    504,
+                    "GITHUB_TIMEOUT",
+                    "The request to GitHub timed out or could not connect. Retry shortly."
+            );
+        } else if (message != null && message.contains("unsupported file encoding")) {
+            sendFileError(
+                    exchange,
+                    502,
+                    "UNSUPPORTED_CONTENT",
+                    "GitHub returned a file format RepoLens cannot display."
+            );
+        } else {
+            sendFileError(
+                    exchange,
+                    502,
+                    "GITHUB_UNAVAILABLE",
+                    "GitHub could not provide this file. Retry shortly."
+            );
+        }
+    }
+
+    private void sendFileError(
+            HttpExchange exchange,
+            int status,
+            String code,
+            String message
+    ) throws IOException {
+        sendJson(exchange, status, new StructuredErrorResponse(code, message));
     }
 
     public void getRepositoryActivity(
@@ -559,6 +682,8 @@ public class RepositoryController {
     }
 
     private record ErrorResponse(String error) {}
+
+    private record StructuredErrorResponse(String code, String error) {}
 
     record Pagination(int page, int limit) {}
 }
