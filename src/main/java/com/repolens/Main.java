@@ -9,6 +9,7 @@ import com.repolens.controller.OAuthController;
 import com.repolens.controller.RepositoryController;
 import com.repolens.server.WebServer;
 import com.repolens.service.RepositoryService;
+import com.repolens.service.CodebaseAnalysisService;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -40,8 +41,17 @@ public class Main {
         RepositoryService repositoryService =
                 new RepositoryService(githubApiClient);
 
+        CodebaseAnalysisService codebaseAnalysisService =
+                new CodebaseAnalysisService(
+                        githubApiClient,
+                        repositoryService
+                );
+
         RepositoryController repositoryController =
-                new RepositoryController(repositoryService);
+                new RepositoryController(
+                        repositoryService,
+                        codebaseAnalysisService
+                );
 
         WebServer server =
                 new WebServer(

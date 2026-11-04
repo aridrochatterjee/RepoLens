@@ -65,4 +65,21 @@ class RepositoryControllerValidationTest {
                 )
         );
     }
+
+    @Test
+    void enforcesLargestFileLimits() {
+        assertEquals(30, controller.parseLargestLimit("30"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> controller.parseLargestLimit("0")
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> controller.parseLargestLimit("31")
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> controller.parseLargestLimit("unlimited")
+        );
+    }
 }

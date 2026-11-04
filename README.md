@@ -9,6 +9,7 @@ RepoLens is a Java 21 and vanilla JavaScript application for exploring GitHub re
 - Repository health estimate with factor scores, explanations, strengths, and attention areas.
 - Commit activity chart for a selected 7-, 30-, or 90-day period (30 days by default).
 - Paginated recent commits and contributor statistics with contribution distribution.
+- Code intelligence from GitHub's recursive Git Trees API: file and directory counts, file-type composition, folder exploration, largest files, and evidence-backed structural observations.
 - Responsive dark and light themes.
 
 ## Run locally
@@ -31,6 +32,7 @@ Repository analytics routes require the RepoLens session cookie and accept only 
 | `GET /api/repository/activity` | `url` (required), `period` (7, 30, or 90; default 30) | Daily and weekly commit activity |
 | `GET /api/repository/commits` | `url` (required), `page` (1–100; default 1), `limit` (1–30; default 10) | Recent commits, latest first |
 | `GET /api/repository/contributors` | `url` (required) | Contributions and relative distribution |
+| `GET /api/repository/codebase` | `url` (required), `limit` (1–30; default 10) | One recursive tree analysis for composition, directories, explorer, largest files, and hotspots |
 
 Repository URLs are validated server-side and must be HTTPS `github.com/{owner}/{repository}` URLs. GitHub API errors are translated to safe HTTP error responses; rate limits and permission failures are surfaced rather than replaced with synthetic data.
 
@@ -75,6 +77,21 @@ If GitHub is still calculating statistics, activity is returned with `available:
 
 Commit responses contain `repositoryFullName`, `page`, `limit`, and a `commits` array. Entries include `sha`, `shortSha`, `message`, nullable author avatar, author name, date, and GitHub commit URL. Contributor responses include `repositoryFullName`, `totalReturned`, `available`, `mayBeTruncated`, `contributors`, and a `limitation` explanation. Each contributor includes nullable profile fields, contribution count, and percentage share of contributions returned.
 
+The codebase response includes availability, branch, truncation flags, summary totals, composition counts, a bounded `treeEntries` list, directory aggregates, ranked largest files, structural observations, and limitations. A missing default branch or unavailable tree returns `available: false`. A valid empty tree returns `available: true` with zero counts. GitHub's `truncated` flag is retained, and all derived totals are explicitly partial in that case. Explorer output is capped at 3,000 entries, directory results at 2,000, and largest-file results at the validated `limit` (maximum 30).
+
+## Code intelligence methodology and limitations
+
+The code intelligence endpoint fetches repository metadata once to identify its default branch, then requests one recursive Git tree. All codebase counts, directory aggregates, and observations are computed from that tree response; the endpoint does not fetch each file's contents. Existing language-byte analytics remains a separate GitHub API request.
+
+- Tracked files are Git tree `blob` entries. Tree entries are directories; Git does not track empty directories, so they cannot be detected or reported.
+- A file's extension is its final suffix, lowercased; dotfiles and extensionless names use `[no extension]`. File categories (`Source code`, `Configuration`, `Documentation`, `Assets`, `Other`) and language file counts use a fixed extension/name mapping. These heuristics are not GitHub Linguist and can be inaccurate. Binary formats are categorized as assets, not source code.
+- Blob byte totals include only entries with a numeric size. Missing sizes are counted separately and excluded from byte shares. Nested-directory counts and percentages include descendants, so nested shares overlap. `"(root)"` describes files directly in the repository root.
+- The largest-file list ranks entries with known blob sizes. File sizes are Git blob sizes, not checkout size, source-line counts, or proof of a performance or maintainability problem.
+- Tree exploration returns at most 3,000 path entries and is incrementally rendered in batches of 100. Directory aggregates are capped at 2,000 results. GitHub can truncate recursive trees; when it does, counts and observations cover only returned entries and must not be interpreted as complete.
+- Structural observations use explicit thresholds: more than 500 files under a directory, a file larger than 10 MiB, a file path at depth 12 or more, and a directory containing more than 50% of known blob bytes. Single-file directories and recognizable `node_modules`, `vendor`, `dist`, `build`, `target`, `coverage`, `generated`, or `.git` paths are also surfaced as observations. These are investigation prompts, not health ratings or claims of complexity/technical debt.
+
+The codebase result is produced from one tree retrieval per request and is not cached. This avoids cross-user leakage of private repository data and stale authorization-dependent entries. The API response and frontend path list are bounded for rendering, while tree parsing is limited to the entries returned by GitHub.
+
 ## Health estimate methodology
 
 RepoLens presents an estimate, not an official GitHub rating or an assessment of code quality, security, or project suitability. Five factors have equal 20% weight; unavailable factors are omitted and the remaining weights are renormalized. If no factors can be scored, the overall score is unavailable rather than zero.
@@ -91,7 +108,7 @@ Factor scores of 70 or higher are listed as positive signals; scores below 50 ar
 
 ## GitHub API dependencies and limitations
 
-RepoLens uses the GitHub REST API for repository metadata, languages, commit activity, commits, and contributors. GitHub's commit activity endpoint may return a processing response while statistics are being generated; those data are explicitly shown as unavailable. Contributor queries are capped at 500 entries to bound API usage, and the response indicates when that cap is reached. Repository visibility and access depend on the signed-in GitHub user's token permissions; the configured OAuth scope is intentionally not expanded by this phase.
+RepoLens uses the GitHub REST API for repository metadata, languages, commit activity, commits, contributors, and recursive Git trees. GitHub's commit activity endpoint may return a processing response while statistics are being generated; those data are explicitly shown as unavailable. Contributor queries are capped at 500 entries to bound API usage, and the response indicates when that cap is reached. Repository visibility and access depend on the signed-in GitHub user's token permissions; the configured OAuth scope is intentionally not expanded by this phase. GitHub may truncate trees or omit size data for some entries.
 
 ## Security notes
 
@@ -100,6 +117,7 @@ RepoLens uses the GitHub REST API for repository metadata, languages, commit act
 - The local server binds to loopback, session lifetime is enforced server-side, session cookies are `HttpOnly` and `SameSite=Lax`, and outbound GitHub requests require HTTPS and do not follow redirects to other hosts.
 - A production deployment must terminate HTTPS, set `Secure` cookies, and review CSRF protections and session storage for its deployment topology.
 - GitHub data is rendered with safe DOM APIs; external profile and commit links are restricted to HTTPS GitHub hosts.
+- Code intelligence does not cache authenticated tree responses, avoiding cross-account cache leakage. Tree paths are validated before aggregation and are never resolved against the server filesystem.
 
 ## Tests
 

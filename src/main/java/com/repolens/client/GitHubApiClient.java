@@ -6,10 +6,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.nio.charset.StandardCharsets;
 
 public class GitHubApiClient {
 
@@ -92,6 +94,24 @@ public class GitHubApiClient {
         URI endpoint = URI.create(
                 API_BASE_URL + "/repos/" + owner + "/" + repository
                         + "/contributors?per_page=" + limit + "&page=" + page
+        );
+
+        return getJson(endpoint, accessToken);
+    }
+
+    public JsonNode getRepositoryTree(
+            String owner,
+            String repository,
+            String branch,
+            String accessToken
+    ) {
+        String encodedBranch = URLEncoder.encode(
+                branch,
+                StandardCharsets.UTF_8
+        ).replace("+", "%20");
+        URI endpoint = URI.create(
+                API_BASE_URL + "/repos/" + owner + "/" + repository
+                        + "/git/trees/" + encodedBranch + "?recursive=1"
         );
 
         return getJson(endpoint, accessToken);

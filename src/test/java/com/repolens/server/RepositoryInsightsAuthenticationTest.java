@@ -46,7 +46,8 @@ class RepositoryInsightsAuthenticationTest {
                 "/api/repository/health",
                 "/api/repository/activity",
                 "/api/repository/commits",
-                "/api/repository/contributors"
+                "/api/repository/contributors",
+                "/api/repository/codebase"
         }) {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(

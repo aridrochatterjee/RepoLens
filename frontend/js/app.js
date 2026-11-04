@@ -50,6 +50,7 @@ const CONFIG = {
         activity: "/api/repository/activity",
         commits: "/api/repository/commits",
         contributors: "/api/repository/contributors",
+        codebase: "/api/repository/codebase",
     },
 
     languageColors: {
@@ -902,6 +903,342 @@ function renderContributors(container, data) {
     ));
 }
 
+function renderCodebase(container, data) {
+    container.replaceChildren();
+    container.setAttribute("aria-busy", "false");
+    if (!data.available) {
+        setInsightMessage(
+            container,
+            data.unavailableReason || "Repository tree data is unavailable."
+        );
+        return;
+    }
+
+    const composition = data.composition || {};
+    const summary = createElement("div", "codebase-summary");
+    [
+        [formatNumber(data.totalTrackedFiles), "tracked files"],
+        [formatNumber(data.totalDirectories), "directories"],
+        [formatBytes(data.totalKnownBlobSizeBytes), "reported blob size"],
+        [String((composition.extensions || []).length), "file types"],
+    ].forEach(([value, label]) => {
+        const metric = createElement("div", "codebase-metric");
+        metric.append(
+            createElement("strong", "", value),
+            createElement("span", "", label)
+        );
+        summary.append(metric);
+    });
+    container.append(summary);
+
+    const missingSizes = Number(data.filesMissingSize) || 0;
+    if (missingSizes > 0) {
+        container.append(createElement(
+            "p",
+            "codebase-note",
+            `${formatNumber(missingSizes)} files did not include size metadata; known byte totals exclude them.`
+        ));
+    }
+    if (data.treeTruncated) {
+        container.append(createElement(
+            "p",
+            "codebase-note codebase-warning",
+            "GitHub marked this recursive tree as truncated. All counts and breakdowns are partial."
+        ));
+    }
+    if (data.explorerTruncated) {
+        container.append(createElement(
+            "p",
+            "codebase-note codebase-warning",
+            "The folder explorer is limited to the first 3,000 returned entries."
+        ));
+    }
+
+    const breakdowns = createElement("div", "codebase-breakdowns");
+    breakdowns.append(
+        renderTypeBreakdown("File categories", composition.categories || []),
+        renderTypeBreakdown("File extensions", composition.extensions || [])
+    );
+    if ((composition.languages || []).length > 0) {
+        breakdowns.append(
+            renderTypeBreakdown("Languages inferred from extensions", composition.languages)
+        );
+    }
+    container.append(breakdowns);
+
+    const directoryPanel = createElement("section", "codebase-subsection");
+    directoryPanel.append(
+        createElement("h4", "", "Directory size distribution"),
+        createElement(
+            "p",
+            "codebase-note",
+            "Bars show each directory's share of known blob bytes. Nested directory shares overlap; directories with unknown sizes are excluded from byte totals."
+        )
+    );
+    const directoryChart = createElement("div", "directory-chart");
+    const directories = Array.isArray(data.directories) ? data.directories : [];
+    directories
+        .filter((directory) =>
+            directory.path === "(root)" || !directory.path.includes("/")
+        )
+        .sort((a, b) => {
+            const aSize = Number(a.knownSizeBytes) || 0;
+            const bSize = Number(b.knownSizeBytes) || 0;
+            return bSize - aSize || String(a.path).localeCompare(String(b.path));
+        })
+        .slice(0, 12)
+        .forEach((directory) => {
+            const row = createElement("button", "directory-chart-row");
+            row.type = "button";
+            row.setAttribute(
+                "aria-label",
+                `Explore ${directory.path}: ${formatNumber(directory.fileCount)} files, ${directory.sizeSharePercent ?? "unavailable"} percent of known bytes`
+            );
+            const label = createElement("span", "directory-chart-label", directory.path);
+            const track = createElement("span", "directory-chart-track");
+            const fill = createElement("span", "directory-chart-fill");
+            fill.style.width = `${Math.max(0, Math.min(100, Number(directory.sizeSharePercent) || 0))}%`;
+            track.append(fill);
+            row.append(
+                label,
+                track,
+                createElement("span", "directory-chart-count", `${formatNumber(directory.fileCount)} files`),
+                createElement(
+                    "span",
+                    "directory-chart-size",
+                    directory.sizeSharePercent === null || directory.sizeSharePercent === undefined
+                        ? "—"
+                        : `${Number(directory.sizeSharePercent).toFixed(1)}%`
+                )
+            );
+            row.addEventListener("click", () => {
+                const selector = container.querySelector("#codebase-directory-select");
+                if (selector) {
+                    selector.value = directory.path === "(root)" ? "" : directory.path;
+                    selector.dispatchEvent(new Event("change"));
+                }
+            });
+            directoryChart.append(row);
+        });
+    if (directoryChart.childElementCount === 0) {
+        directoryChart.append(createElement("p", "insight-message", "No directory byte totals are available."));
+    }
+    directoryPanel.append(directoryChart);
+    container.append(directoryPanel);
+
+    const explorer = createElement("section", "codebase-subsection");
+    explorer.append(
+        createElement("h4", "", "File explorer"),
+        createElement(
+            "p",
+            "codebase-note",
+            "Select a folder to inspect its immediate contents. Empty directories are not stored in Git and cannot be shown."
+        )
+    );
+    const entries = Array.isArray(data.treeEntries) ? data.treeEntries : [];
+    const selectLabel = createElement("label", "codebase-select-label", "Current folder");
+    const select = createElement("select", "codebase-directory-select");
+    select.id = "codebase-directory-select";
+    select.setAttribute("aria-label", "Choose a repository folder");
+    select.append(new Option("/", ""));
+    entries
+        .filter((entry) => entry.type === "directory")
+        .sort((a, b) => String(a.path).localeCompare(String(b.path)))
+        .forEach((entry) => select.append(new Option(entry.path, entry.path)));
+    selectLabel.append(select);
+    const contents = createElement("div", "codebase-file-list");
+    const renderContents = () => {
+        contents.replaceChildren();
+        const directory = select.value;
+        const children = entries.filter((entry) => {
+            if (directory === "") {
+                return !entry.path.includes("/") ||
+                    (entry.type === "directory" && !entry.path.includes("/"));
+            }
+            const prefix = `${directory}/`;
+            if (!entry.path.startsWith(prefix)) return false;
+            const remainder = entry.path.slice(prefix.length);
+            return remainder.length > 0 && !remainder.includes("/");
+        });
+        children.sort((a, b) =>
+            (a.type === b.type ? 0 : a.type === "directory" ? -1 : 1) ||
+            String(a.name).localeCompare(String(b.name))
+        );
+
+        if (children.length === 0) {
+            contents.append(createElement(
+                "p",
+                "insight-message",
+                "No child entries are available in this folder."
+            ));
+            return;
+        }
+
+        let visibleCount = 100;
+        const appendVisible = () => {
+            const batch = children.slice(
+                contents.querySelectorAll(".codebase-entry").length,
+                visibleCount
+            );
+            batch.forEach((entry) => {
+                const row = createElement("div", "codebase-entry");
+                if (entry.type === "directory") {
+                    const button = createElement("button", "codebase-folder-button", `▸ ${entry.name}/`);
+                    button.type = "button";
+                    button.addEventListener("click", () => {
+                        select.value = entry.path;
+                        renderContents();
+                    });
+                    row.append(button, createElement("span", "codebase-entry-meta", "Folder"));
+                } else {
+                    const link = createElement("a", "codebase-file-link", entry.name);
+                    const href = safeGitHubUrl(entry.htmlUrl);
+                    if (href) {
+                        link.href = href;
+                        link.target = "_blank";
+                        link.rel = "noopener noreferrer";
+                    } else {
+                        link.removeAttribute("href");
+                    }
+                    row.append(
+                        link,
+                        createElement(
+                            "span",
+                            "codebase-entry-meta",
+                            `${entry.extension || "[directory]"} · ${
+                                entry.sizeBytes === null || entry.sizeBytes === undefined
+                                    ? "size unavailable"
+                                    : formatBytes(entry.sizeBytes)
+                            }`
+                        )
+                    );
+                }
+                contents.append(row);
+            });
+            contents.querySelector(".codebase-more")?.remove();
+            if (visibleCount < children.length) {
+                const more = createElement("button", "codebase-more", "Show 100 more");
+                more.type = "button";
+                more.addEventListener("click", () => {
+                    visibleCount += 100;
+                    appendVisible();
+                });
+                contents.append(more);
+            }
+        };
+        appendVisible();
+    };
+    select.addEventListener("change", renderContents);
+    renderContents();
+    explorer.append(selectLabel, contents);
+    container.append(explorer);
+
+    const largestSection = createElement("section", "codebase-subsection");
+    largestSection.append(
+        createElement("h4", "", "Largest files"),
+        createElement(
+            "p",
+            "codebase-note",
+            "Ranked by reported blob size. Size alone does not demonstrate a performance or maintainability problem."
+        )
+    );
+    const largest = Array.isArray(data.largestFiles) ? data.largestFiles : [];
+    if (largest.length === 0) {
+        largestSection.append(createElement(
+            "p",
+            "insight-message",
+            "No files with known size metadata were returned."
+        ));
+    } else {
+        const list = createElement("ol", "largest-file-list");
+        largest.forEach((file) => {
+            const item = createElement("li", "largest-file-item");
+            const link = createElement("a", "largest-file-link", file.path || file.name);
+            const href = safeGitHubUrl(file.htmlUrl);
+            if (href) {
+                link.href = href;
+                link.target = "_blank";
+                link.rel = "noopener noreferrer";
+            }
+            item.append(
+                link,
+                createElement("span", "largest-file-type", file.extension || "[no extension]"),
+                createElement("strong", "", file.sizeBytes === null || file.sizeBytes === undefined
+                    ? "Size unavailable"
+                    : formatBytes(file.sizeBytes))
+            );
+            list.append(item);
+        });
+        largestSection.append(list);
+    }
+    container.append(largestSection);
+
+    const hotspots = Array.isArray(data.hotspots) ? data.hotspots : [];
+    const hotspotSection = createElement("section", "codebase-subsection");
+    hotspotSection.append(
+        createElement("h4", "", "Structural observations"),
+        createElement(
+            "p",
+            "codebase-note",
+            "Evidence-based structure signals, not measures of code quality, complexity, or technical debt."
+        )
+    );
+    if (hotspots.length === 0) {
+        hotspotSection.append(createElement(
+            "p",
+            "insight-message",
+            "No structural observations met the documented thresholds."
+        ));
+    } else {
+        const list = createElement("ul", "hotspot-list");
+        hotspots.forEach((hotspot) => {
+            const item = createElement("li", "hotspot-item");
+            item.append(
+                createElement("strong", "", hotspot.category || "Observation"),
+                createElement("code", "", hotspot.path || "Repository"),
+                createElement("p", "", hotspot.evidence || ""),
+                createElement("p", "hotspot-suggestion", hotspot.suggestion || "")
+            );
+            list.append(item);
+        });
+        hotspotSection.append(list);
+    }
+    container.append(hotspotSection);
+    container.append(createElement(
+        "p",
+        "insight-limitation",
+        data.limitations || "Repository structure data may be incomplete."
+    ));
+}
+
+function renderTypeBreakdown(title, values) {
+    const section = createElement("section", "codebase-breakdown");
+    section.append(createElement("h4", "", title));
+    if (!Array.isArray(values) || values.length === 0) {
+        section.append(createElement("p", "insight-message", "No file types to report."));
+        return section;
+    }
+
+    const maxFiles = Math.max(...values.map((item) => Number(item.fileCount) || 0));
+    values.slice(0, 12).forEach((item) => {
+        const row = createElement("div", "type-stat-row");
+        const track = createElement("span", "type-stat-track");
+        const fill = createElement("span", "type-stat-fill");
+        fill.style.width = maxFiles === 0
+            ? "0%"
+            : `${Math.max(0, Math.min(100, Number(item.fileCount) / maxFiles * 100))}%`;
+        track.append(fill);
+        row.append(
+            createElement("span", "type-stat-name", item.name || "Other"),
+            track,
+            createElement("span", "type-stat-count", formatNumber(item.fileCount)),
+            createElement("span", "type-stat-size", formatBytes(item.knownSizeBytes))
+        );
+        section.append(row);
+    });
+    return section;
+}
+
 async function requestInsight(endpoint, repositoryUrl, requestId, parameters = {}) {
     const query = new URLSearchParams({
         url: repositoryUrl,
@@ -977,8 +1314,14 @@ function loadRepositoryInsights(resultSection, repositoryUrl, requestId) {
         "Contributors",
         "Contribution activity returned by GitHub"
     );
+    const codebase = createInsightPanel(
+        "codebase-panel",
+        "Code intelligence",
+        "Repository files, composition, directories, largest files, and structural observations"
+    );
     insights.append(
         header,
+        codebase.panel,
         health.panel,
         activity.panel,
         commits.panel,
@@ -986,6 +1329,14 @@ function loadRepositoryInsights(resultSection, repositoryUrl, requestId) {
     );
     resultSection.append(insights);
 
+    void loadInsight(
+        codebase.body,
+        CONFIG.endpoints.codebase,
+        repositoryUrl,
+        requestId,
+        renderCodebase,
+        { limit: "10" }
+    );
     void loadInsight(
         health.body,
         CONFIG.endpoints.health,
