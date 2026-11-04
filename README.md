@@ -2,6 +2,24 @@
 
 RepoLens is a Java 21 and vanilla JavaScript application for exploring GitHub repository metadata and development activity. It uses the JDK `HttpServer` and `HttpClient`, Jackson, Gradle, and GitHub REST API; no web framework or frontend framework is required.
 
+## RepoLens 2.0 frontend
+
+The frontend is a dark-first, GitHub-inspired workspace for repository insights, code intelligence, and developer intelligence. The redesign retains the static HTML/CSS/vanilla JavaScript architecture and existing API contracts.
+
+- **Design system:** `frontend/css/style.css` defines shared color, typography, spacing, border, surface, elevation, transition, and layout tokens. Components use the same tokens in dark and light themes.
+- **Frontend structure:** `frontend/index.html` contains the signed-out product landing page and authenticated workspace shell. `frontend/js/app.js` handles authentication state, repository analysis, safe DOM rendering, and navigation.
+- **Navigation:** The workspace sidebar links to the repository overview and the existing analytics panels. Code intelligence views are grouped in the single tree-analysis panel; developer views are grouped in the contributor, pull-request, and issue panels.
+- **Theme:** The theme toggle switches between dark and light CSS custom-property sets. The preference is stored locally as a presentation setting; authentication tokens are never stored in browser storage.
+- **Responsive and accessible behavior:** The sidebar becomes a keyboard-operable mobile drawer, tables and analytics reflow for narrow screens, focus indicators remain visible, charts expose text descriptions, and motion is reduced when requested by the operating system.
+- **Dependencies:** No frontend packages, build system, or framework were added. The existing server continues to serve the static files at their existing paths.
+
+Run the frontend syntax check and backend tests with:
+
+```sh
+node --check frontend/js/app.js
+./gradlew clean test
+```
+
 ## Features
 
 - GitHub OAuth sign-in, session-backed API access, and logout.

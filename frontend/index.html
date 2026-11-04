@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="en" data-theme="dark">
 <head>
@@ -6,335 +5,374 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta
     name="description"
-    content="RepoLens helps developers understand GitHub repositories through code composition, repository metrics and development insights."
+    content="Explore repository health, code structure, developer activity and collaboration with RepoLens."
   />
-  <meta name="theme-color" content="#0c0b10" />
-
+  <meta name="theme-color" content="#0d1117" />
   <title>RepoLens — Repository intelligence</title>
-
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link
-    href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
-    rel="stylesheet"
-  />
-
   <link rel="stylesheet" href="/css/style.css" />
   <script src="/js/app.js" defer></script>
 </head>
 
 <body>
-  <div class="app">
-
-    <!-- Global navigation -->
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <div class="app app-shell" id="app-shell">
     <header class="navbar">
       <a href="/" class="brand" aria-label="RepoLens home">
-        <span class="brand-icon" aria-hidden="true">R</span>
-        <span class="brand-name">
-          RepoLens<span class="brand-period">.</span>
+        <span class="brand-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M5 19V5h8.2a5.8 5.8 0 0 1 0 11.6H9.2M5 12h7.5" />
+            <circle cx="17.5" cy="17.5" r="2.5" />
+          </svg>
         </span>
+        <span class="brand-name">RepoLens<span class="brand-period">.</span></span>
       </a>
 
+      <div id="workspace-context" class="workspace-context" hidden>
+        <span class="context-divider" aria-hidden="true"></span>
+        <span id="workspace-repository-context">Repository workspace</span>
+      </div>
+
       <nav class="nav-actions" aria-label="Account and appearance">
-        <div class="auth-actions">
-          <div id="user-profile" class="user-profile" hidden>
-            <img
-              id="user-avatar"
-              src=""
-              alt="GitHub profile avatar"
-            />
-            <span id="user-name"></span>
-            <button
-              type="button"
-              id="logout-button"
-              class="logout-button"
-            >
-              Sign out
-            </button>
-          </div>
-        </div>
+        <button
+          type="button"
+          id="sidebar-toggle"
+          class="icon-button sidebar-toggle"
+          aria-label="Open workspace navigation"
+          aria-controls="workspace-sidebar"
+          aria-expanded="false"
+          title="Toggle navigation"
+          hidden
+        >
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
 
         <button
           type="button"
           id="theme-toggle"
-          class="theme-toggle"
+          class="icon-button theme-toggle"
           aria-label="Switch to light theme"
           aria-pressed="false"
           title="Toggle theme"
         >
-          <svg
-            class="sun-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.8"
-            stroke-linecap="round"
-            aria-hidden="true"
-          >
-            <circle cx="12" cy="12" r="4"></circle>
+          <svg class="sun-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="4" />
             <path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" />
           </svg>
-
-          <svg
-            class="moon-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.8"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-          >
+          <svg class="moon-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13Z" />
           </svg>
         </button>
+
+        <div id="user-profile" class="user-profile" hidden>
+          <button
+            type="button"
+            id="profile-menu-toggle"
+            class="profile-menu-toggle"
+            aria-expanded="false"
+            aria-controls="profile-menu"
+          >
+            <img id="user-avatar" src="" alt="" />
+            <span id="user-name"></span>
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="m4 6 4 4 4-4" />
+            </svg>
+          </button>
+          <div id="profile-menu" class="profile-menu" hidden>
+            <a id="user-profile-link" href="https://github.com/" target="_blank" rel="noopener noreferrer">
+              View GitHub profile
+            </a>
+            <button type="button" id="logout-button" class="logout-button">Sign out</button>
+          </div>
+        </div>
       </nav>
     </header>
 
-    <!-- Signed-out state -->
-    <section id="login-view" class="login-view" hidden>
-      <div class="login-card">
-        <div class="login-icon" aria-hidden="true">R</div>
-
-        <span class="section-label">REPOSITORY INTELLIGENCE</span>
-
-        <h1>
-          Your codebase,
-          <span class="gradient-text">in perspective.</span>
-        </h1>
-
-        <p>
-          Connect your GitHub account to explore repository information,
-          code composition and development insights.
-        </p>
-
-        <a href="/auth/github/login" class="github-login-button">
+    <main id="login-view" class="landing-page" hidden>
+      <nav class="landing-nav" aria-label="Product navigation">
+        <a href="#feature-suite">Features</a>
+        <a href="#how-it-works">How it works</a>
+        <a class="landing-nav-signin" href="/auth/github/login" data-github-login>
           <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path d="M12 .9a11.1 11.1 0 0 0-3.51 21.63c.55.1.76-.24.76-.54v-2.1c-3.1.67-3.75-1.32-3.75-1.32-.5-1.28-1.23-1.62-1.23-1.62-1.01-.69.08-.68.08-.68 1.12.08 1.71 1.15 1.71 1.15 1 .1.75 1.93 3.21 1.47.1-.72.39-1.22.71-1.5-2.47-.28-5.07-1.23-5.07-5.5 0-1.22.44-2.22 1.15-3-.12-.28-.5-1.42.11-2.96 0 0 .94-.3 3.05 1.15a10.6 10.6 0 0 1 5.55 0c2.11-1.45 3.04-1.15 3.04-1.15.61 1.54.23 2.68.11 2.96.72.78 1.15 1.78 1.15 3 0 4.28-2.61 5.21-5.09 5.49.4.35.76 1.02.76 2.06v3.05c0 .3.2.65.77.54A11.1 11.1 0 0 0 12 .9Z" />
           </svg>
-          Continue with GitHub
+          Sign in
         </a>
+      </nav>
 
-        <p class="login-note">
-          GitHub OAuth authentication. Your access token stays on the server.
-        </p>
-
-        <div id="login-message" role="status" aria-live="polite"></div>
-      </div>
-    </section>
-
-    <!-- Signed-in workspace -->
-    <main id="dashboard-view" hidden>
-
-      <!-- Repository search -->
-      <section class="hero">
-        <div class="hero-content">
-
+      <section class="landing-hero">
+        <div class="landing-copy">
           <div class="eyebrow">
-            <span class="eyebrow-indicator"></span>
-            REPOSITORY WORKSPACE
+            <span class="eyebrow-indicator" aria-hidden="true"></span>
+            A clearer view of your software
           </div>
-
-          <h1>
-            Understand your codebase
-            <span class="gradient-text">beyond the commits.</span>
-          </h1>
-
-          <p class="hero-description">
-            A clearer view of what's inside a repository.
-            Inspect its structure, understand its languages and
-            explore the details behind the project.
+          <h1>Understand your codebase <span>beyond the commits.</span></h1>
+          <p>
+            Explore repository health, code structure, developer activity and
+            collaboration — all in one workspace.
           </p>
+          <a href="/auth/github/login" class="github-login-button" data-github-login>
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12 .9a11.1 11.1 0 0 0-3.51 21.63c.55.1.76-.24.76-.54v-2.1c-3.1.67-3.75-1.32-3.75-1.32-.5-1.28-1.23-1.62-1.23-1.62-1.01-.69.08-.68.08-.68 1.12.08 1.71 1.15 1.71 1.15 1 .1.75 1.93 3.21 1.47.1-.72.39-1.22.71-1.5-2.47-.28-5.07-1.23-5.07-5.5 0-1.22.44-2.22 1.15-3-.12-.28-.5-1.42.11-2.96 0 0 .94-.3 3.05 1.15a10.6 10.6 0 0 1 5.55 0c2.11-1.45 3.04-1.15 3.04-1.15.61 1.54.23 2.68.11 2.96.72.78 1.15 1.78 1.15 3 0 4.28-2.61 5.21-5.09 5.49.4.35.76 1.02.76 2.06v3.05c0 .3.2.65.77.54A11.1 11.1 0 0 0 12 .9Z" />
+            </svg>
+            Continue with GitHub
+          </a>
+          <p class="login-note">OAuth sign-in. Your GitHub token stays on the server.</p>
+          <div id="login-message" class="login-message" role="status" aria-live="polite"></div>
+        </div>
 
-          <div class="section-label">ANALYZE A REPOSITORY</div>
-
-          <form id="repo-form" class="search-form" novalidate>
-            <div class="input-wrapper">
-              <svg
-                class="github-icon"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                aria-hidden="true"
-              >
-                <path d="M12 .9a11.1 11.1 0 0 0-3.51 21.63c.55.1.76-.24.76-.54v-2.1c-3.1.67-3.75-1.32-3.75-1.32-.5-1.28-1.23-1.62-1.23-1.62-1.01-.69.08-.68.08-.68 1.12.08 1.71 1.15 1.71 1.15 1 .1.75 1.93 3.21 1.47.1-.72.39-1.22.71-1.5-2.47-.28-5.07-1.23-5.07-5.5 0-1.22.44-2.22 1.15-3-.12-.28-.5-1.42.11-2.96 0 0 .94-.3 3.05 1.15a10.6 10.6 0 0 1 5.55 0c2.11-1.45 3.04-1.15 3.04-1.15.61 1.54.23 2.68.11 2.96.72.78 1.15 1.78 1.15 3 0 4.28-2.61 5.21-5.09 5.49.4.35.76 1.02.76 2.06v3.05c0 .3.2.65.77.54A11.1 11.1 0 0 0 12 .9Z" />
-              </svg>
-
-              <input
-                type="url"
-                id="repo-url"
-                name="repo-url"
-                placeholder="https://github.com/owner/repository"
-                autocomplete="url"
-                spellcheck="false"
-                aria-label="GitHub repository URL"
-                aria-describedby="input-hint message"
-                required
-              />
-
-              <button
-                type="button"
-                id="clear-button"
-                class="clear-button"
-                aria-label="Clear repository URL"
-                hidden
-              >
-                &times;
-              </button>
+        <div class="product-preview" aria-label="RepoLens workspace capabilities">
+          <div class="preview-window">
+            <div class="preview-titlebar">
+              <span class="preview-brand-mark" aria-hidden="true">R</span>
+              <span>Repository workspace</span>
+              <span class="preview-status"><span aria-hidden="true"></span> GitHub data</span>
             </div>
-
-            <button
-              type="submit"
-              id="analyze-button"
-              class="analyze-button"
-            >
-              <span class="button-text">Analyze repository</span>
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M5 12h14m-7-7 7 7-7 7" />
-              </svg>
-            </button>
-          </form>
-
-          <p class="input-hint" id="input-hint">
-            Enter a GitHub repository URL to get started.
-          </p>
-
-          <div
-            id="message"
-            class="message"
-            role="status"
-            aria-live="polite"
-            aria-atomic="true"
-          ></div>
-
-          <div class="hero-meta">
-            <span class="meta-item">
-              <span class="meta-check">✓</span>
-              GitHub-powered data
-            </span>
-
-            <span class="meta-divider"></span>
-
-            <span class="meta-item">
-              <span class="meta-check">✓</span>
-              Built for developers
-            </span>
+            <div class="preview-body">
+              <div class="preview-sidebar" aria-hidden="true">
+                <span class="active"></span><span></span><span></span><span></span>
+              </div>
+              <div class="preview-panels">
+                <div class="preview-panel preview-panel-wide">
+                  <span class="preview-kicker">REPOSITORY INSIGHTS</span>
+                  <strong>Signals, not guesswork.</strong>
+                  <span class="preview-line preview-line-long"></span>
+                  <span class="preview-line"></span>
+                </div>
+                <div class="preview-panel">
+                  <span class="preview-kicker">CODE INTELLIGENCE</span>
+                  <strong>See how the project is structured.</strong>
+                </div>
+                <div class="preview-panel">
+                  <span class="preview-kicker">DEVELOPER INTELLIGENCE</span>
+                  <strong>Understand activity and collaboration.</strong>
+                </div>
+              </div>
+            </div>
           </div>
+          <p class="preview-caption">A focused workspace for the details behind a repository.</p>
         </div>
       </section>
 
-      <!-- Product capabilities -->
-      <section class="features-section">
+      <section id="feature-suite" class="landing-features">
         <div class="section-heading">
-          <span class="section-label">INSIDE REPOLENS</span>
-
-          <h2>
-            A closer look at your
-            <span>repository.</span>
-          </h2>
-
-          <p>
-            Start with the project overview. Then dig into the
-            composition and activity behind the code.
-          </p>
+          <span class="section-label">THE REPOSITORY, IN CONTEXT</span>
+          <h2>From project shape to team activity.</h2>
+          <p>One place to explore the information GitHub already makes available.</p>
         </div>
-
         <div class="features">
           <article class="feature-card">
-            <div class="feature-top">
-              <div class="feature-icon purple-icon" aria-hidden="true">◈</div>
-              <span class="feature-number">01</span>
-            </div>
-
-            <h3>Repository overview</h3>
-
-            <p>
-              Review project details, stars, forks, watchers,
-              open issues and the repository's primary language.
-            </p>
-
-            <span class="feature-link">
-              Project information
-              <span aria-hidden="true">↗</span>
+            <span class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M4 19V5m0 14h16M8 15l3-4 3 2 5-7" /></svg>
             </span>
+            <h3>Repository insights</h3>
+            <p>Review metadata, health factors, commit activity, contributors and recent changes.</p>
           </article>
-
           <article class="feature-card">
-            <div class="feature-top">
-              <div class="feature-icon green-icon" aria-hidden="true">▥</div>
-              <span class="feature-number">02</span>
-            </div>
-
-            <h3>Language composition</h3>
-
-            <p>
-              See which programming languages make up the project,
-              including their relative share and code size.
-            </p>
-
-            <span class="feature-link">
-              Code composition
-              <span aria-hidden="true">↗</span>
+            <span class="feature-icon feature-icon-violet" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M4 5h6v6H4zM14 5h6v6h-6zM4 15h6v4H4zM14 15h6v4h-6z" /></svg>
             </span>
+            <h3>Code intelligence</h3>
+            <p>Explore the repository tree, file types, directory sizes and largest tracked files.</p>
           </article>
-
           <article class="feature-card">
-            <div class="feature-top">
-              <div class="feature-icon blue-icon" aria-hidden="true">⌘</div>
-              <span class="feature-number">03</span>
-            </div>
-
-            <h3>Health and activity</h3>
-
-            <p>
-              Review an explainable health estimate, recent commit
-              activity, commit history and contributor statistics.
-            </p>
-
-            <span class="feature-link">
-              Repository insights
-              <span aria-hidden="true">✓</span>
+            <span class="feature-icon feature-icon-green" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8" r="3" /><circle cx="17" cy="9" r="2.5" /><path d="M3.5 19a5.5 5.5 0 0 1 11 0m1-4a4 4 0 0 1 5 4" /></svg>
             </span>
+            <h3>Developer intelligence</h3>
+            <p>See contributor activity, pull request and issue patterns, and evidence-backed collaboration signals.</p>
           </article>
         </div>
       </section>
 
-      <!-- Closing section -->
-      <section class="bottom-cta">
+      <section id="how-it-works" class="landing-method">
         <div>
-          <span class="section-label">A BETTER VIEW OF YOUR CODE</span>
-          <h2>Start with a repository.</h2>
-          <p>Find the details that commits alone don't show.</p>
+          <span class="section-label">BUILT AROUND REAL DATA</span>
+          <h2>Connect a repository. Follow the evidence.</h2>
+          <p>
+            RepoLens reads repository information through GitHub's API. Estimates
+            and samples are labeled with their scope; missing data stays unavailable
+            instead of being replaced with made-up numbers.
+          </p>
         </div>
-
-        <a href="#repo-form" class="cta-link">
-          Analyze a repository
-          <span aria-hidden="true">↑</span>
+        <a href="/auth/github/login" class="text-link" data-github-login>
+          Continue with GitHub <span aria-hidden="true">→</span>
         </a>
       </section>
+
+      <footer class="landing-footer">
+        <a href="/" class="footer-brand">
+          <span class="footer-brand-icon" aria-hidden="true">R</span>
+          RepoLens<span class="brand-period">.</span>
+        </a>
+        <span>© 2026 RepoLens. Built for developers by Horizons.</span>
+      </footer>
     </main>
 
-    <!-- Footer -->
-    <footer class="footer" id="footer-view" hidden>
+    <main id="dashboard-view" class="workspace-shell" hidden>
+      <aside id="workspace-sidebar" class="sidebar" aria-label="Workspace navigation">
+        <div class="sidebar-heading">
+          <span class="sidebar-overline">WORKSPACE</span>
+          <span class="sidebar-caption">Repository analysis</span>
+        </div>
+        <nav class="sidebar-nav" aria-label="Repository sections">
+          <div class="nav-group">
+            <span class="nav-group-label">OVERVIEW</span>
+            <a class="nav-item active" href="#workspace-overview" title="Dashboard">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1" /><rect x="14" y="4" width="6" height="4" rx="1" /><rect x="14" y="11" width="6" height="9" rx="1" /><rect x="4" y="14" width="7" height="6" rx="1" /></svg>
+              <span>Dashboard</span>
+            </a>
+            <a class="nav-item" href="#repository-result" title="Repository insights" data-analysis-link hidden>
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v17H6.5A2.5 2.5 0 0 1 4 17.5zM4 17.5A2.5 2.5 0 0 1 6.5 15H20" /><path d="M8 7h8M8 10h6" /></svg>
+              <span>Repository insights</span>
+            </a>
+          </div>
+
+          <div id="analysis-navigation" hidden>
+            <div class="nav-group">
+              <span class="nav-group-label">CODE INTELLIGENCE</span>
+              <a class="nav-item" href="#codebase-panel" data-codebase-target="codebase-explorer" title="File explorer">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H10l2 2h7.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" /><path d="M3 9h18" /></svg>
+                <span>File explorer</span>
+              </a>
+              <a class="nav-item" href="#codebase-panel" data-codebase-target="codebase-composition" title="Code composition">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5v14m0 0h16M7 15l3-4 3 2 5-7" /></svg>
+                <span>Code composition</span>
+              </a>
+              <a class="nav-item" href="#codebase-panel" data-codebase-target="codebase-largest-files" title="Largest files">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 3h8l4 4v14H6zM14 3v5h5M9 13h6m-6 4h6" /></svg>
+                <span>Largest files</span>
+              </a>
+              <a class="nav-item" href="#codebase-panel" data-codebase-target="codebase-directories" title="Directory analysis">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H10l2 2h7.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5zM8 11v5m4-3v3m4-6v6" /></svg>
+                <span>Directory analysis</span>
+              </a>
+            </div>
+
+            <div class="nav-group">
+              <span class="nav-group-label">DEVELOPER INTELLIGENCE</span>
+              <a class="nav-item" href="#developer-contributors" title="Contributors">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="9" cy="8" r="3" /><circle cx="17" cy="9" r="2.5" /><path d="M3.5 19a5.5 5.5 0 0 1 11 0m1-4a4 4 0 0 1 5 4" /></svg>
+                <span>Contributors</span>
+              </a>
+              <a class="nav-item" href="#developer-pull-requests" title="Pull requests">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="6" cy="6" r="2" /><circle cx="6" cy="18" r="2" /><circle cx="18" cy="18" r="2" /><path d="M6 8v8m12 0V9a3 3 0 0 0-3-3h-2m0 0 2.5-2.5M13 6l2.5 2.5" /></svg>
+                <span>Pull requests</span>
+              </a>
+              <a class="nav-item" href="#developer-issues" title="Issues">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5m0 4h.01" /></svg>
+                <span>Issues</span>
+              </a>
+              <a class="nav-item" href="#developer-contributors" title="Collaboration insights">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="6" cy="12" r="2" /><circle cx="18" cy="6" r="2" /><circle cx="18" cy="18" r="2" /><path d="m8 11 8-4m-8 6 8 4" /></svg>
+                <span>Collaboration</span>
+              </a>
+            </div>
+
+            <div class="nav-group">
+              <span class="nav-group-label">ACTIVITY</span>
+              <a class="nav-item" href="#activity-panel" title="Commit activity">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4" /></svg>
+                <span>Commit activity</span>
+              </a>
+              <a class="nav-item" href="#commits-panel" title="Recent commits">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></svg>
+                <span>Recent commits</span>
+              </a>
+            </div>
+          </div>
+        </nav>
+
+        <div class="sidebar-footer">
+          <span class="sidebar-status-dot" aria-hidden="true"></span>
+          <span>GitHub-backed analysis</span>
+        </div>
+      </aside>
+
+      <div id="sidebar-backdrop" class="sidebar-backdrop" hidden></div>
+
+      <div class="workspace-content">
+        <div id="main-content" class="workspace-main">
+          <section id="workspace-overview" class="workspace-intro">
+            <div class="page-heading">
+              <div>
+                <div class="breadcrumb"><span>Workspace</span><span aria-hidden="true">/</span><strong>Overview</strong></div>
+                <h1>Repository intelligence</h1>
+                <p>Bring repository structure and development activity into focus.</p>
+              </div>
+              <span class="data-source-badge"><span aria-hidden="true"></span> GitHub REST API</span>
+            </div>
+
+            <section class="search-panel" aria-labelledby="search-title">
+              <div class="search-panel-heading">
+                <div>
+                  <span class="section-label">NEW ANALYSIS</span>
+                  <h2 id="search-title">Choose a repository</h2>
+                </div>
+                <span class="search-hint">Private repositories follow your GitHub permissions.</span>
+              </div>
+              <form id="repo-form" class="search-form" role="search" novalidate>
+                <label class="sr-only" for="repo-url">GitHub repository URL</label>
+                <div class="input-wrapper">
+                  <svg class="github-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M12 .9a11.1 11.1 0 0 0-3.51 21.63c.55.1.76-.24.76-.54v-2.1c-3.1.67-3.75-1.32-3.75-1.32-.5-1.28-1.23-1.62-1.23-1.62-1.01-.69.08-.68.08-.68 1.12.08 1.71 1.15 1.71 1.15 1 .1.75 1.93 3.21 1.47.1-.72.39-1.22.71-1.5-2.47-.28-5.07-1.23-5.07-5.5 0-1.22.44-2.22 1.15-3-.12-.28-.5-1.42.11-2.96 0 0 .94-.3 3.05 1.15a10.6 10.6 0 0 1 5.55 0c2.11-1.45 3.04-1.15 3.04-1.15.61 1.54.23 2.68.11 2.96.72.78 1.15 1.78 1.15 3 0 4.28-2.61 5.21-5.09 5.49.4.35.76 1.02.76 2.06v3.05c0 .3.2.65.77.54A11.1 11.1 0 0 0 12 .9Z" />
+                  </svg>
+                  <input
+                    type="url"
+                    id="repo-url"
+                    name="repo-url"
+                    placeholder="https://github.com/owner/repository"
+                    autocomplete="url"
+                    spellcheck="false"
+                    aria-describedby="input-hint message"
+                    required
+                  />
+                  <button type="button" id="clear-button" class="clear-button" aria-label="Clear repository URL" hidden>&times;</button>
+                </div>
+                <button type="submit" id="analyze-button" class="analyze-button">
+                  <span class="button-text">Analyze repository</span>
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14m-7-7 7 7-7 7" /></svg>
+                </button>
+              </form>
+              <p class="input-hint" id="input-hint">Enter an HTTPS GitHub repository URL.</p>
+              <div id="message" class="message" role="status" aria-live="polite" aria-atomic="true"></div>
+            </section>
+          </section>
+
+          <section id="workspace-welcome" class="workspace-welcome">
+            <div class="welcome-heading">
+              <span class="section-label">YOUR REPOSITORY, IN CONTEXT</span>
+              <h2>Start with the signals that matter.</h2>
+              <p>Choose a repository to load its real metadata, code tree, and activity.</p>
+            </div>
+            <div class="welcome-grid">
+              <article class="welcome-card">
+                <span class="welcome-icon" aria-hidden="true">01</span>
+                <div><h3>Repository health</h3><p>Understand the factors behind an explainable activity estimate.</p></div>
+              </article>
+              <article class="welcome-card">
+                <span class="welcome-icon welcome-icon-violet" aria-hidden="true">02</span>
+                <div><h3>Code structure</h3><p>Browse tracked files, language data, directory shares and structural evidence.</p></div>
+              </article>
+              <article class="welcome-card">
+                <span class="welcome-icon welcome-icon-green" aria-hidden="true">03</span>
+                <div><h3>Team activity</h3><p>Review contributor, pull request, issue and collaboration data from GitHub.</p></div>
+              </article>
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <footer id="footer-view" class="workspace-footer" hidden>
       <a href="/" class="footer-brand">
-        <span class="footer-brand-icon">R</span>
+        <span class="footer-brand-icon" aria-hidden="true">R</span>
         RepoLens<span class="brand-period">.</span>
       </a>
-
       <p>Understand your codebase beyond the commits.</p>
-
-      <span class="copyright">
-        © 2026 RepoLens. Built for developers by Horizons.
-      </span>
+      <span class="copyright">© 2026 RepoLens. Built for developers by Horizons.</span>
     </footer>
-
   </div>
 </body>
 </html>

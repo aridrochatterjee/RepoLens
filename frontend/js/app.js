@@ -11,16 +11,27 @@
    --------------------------------------------------------- */
 
 const elements = {
+    appShell: document.getElementById("app-shell"),
     themeToggle: document.getElementById("theme-toggle"),
     themeColorMeta: document.querySelector('meta[name="theme-color"]'),
 
     loginView: document.getElementById("login-view"),
     dashboardView: document.getElementById("dashboard-view"),
     footerView: document.getElementById("footer-view"),
+    workspaceWelcome: document.getElementById("workspace-welcome"),
+    workspaceContext: document.getElementById("workspace-context"),
+    workspaceRepositoryContext: document.getElementById("workspace-repository-context"),
+    sidebarToggle: document.getElementById("sidebar-toggle"),
+    sidebar: document.getElementById("workspace-sidebar"),
+    sidebarBackdrop: document.getElementById("sidebar-backdrop"),
+    analysisNavigation: document.getElementById("analysis-navigation"),
 
     userProfile: document.getElementById("user-profile"),
     userAvatar: document.getElementById("user-avatar"),
     userName: document.getElementById("user-name"),
+    userProfileLink: document.getElementById("user-profile-link"),
+    profileMenu: document.getElementById("profile-menu"),
+    profileMenuToggle: document.getElementById("profile-menu-toggle"),
     logoutButton: document.getElementById("logout-button"),
     loginMessage: document.getElementById("login-message"),
 
@@ -98,7 +109,8 @@ async function readJson(response) {
     try {
         return await response.json();
     } catch {
-        return {};
+        if (!response.ok) return {};
+        throw new Error("RepoLens returned an invalid response.");
     }
 }
 
@@ -196,7 +208,7 @@ function applyTheme(theme) {
     if (elements.themeColorMeta) {
         elements.themeColorMeta.setAttribute(
             "content",
-            isLight ? "#faf9fc" : "#0d0c10"
+            isLight ? "#f6f8fa" : "#0d1117"
         );
     }
 
@@ -217,6 +229,126 @@ function initializeTheme() {
     });
 }
 
+function closeMobileNavigation(restoreFocus = true) {
+    if (!elements.appShell) return;
+    const wasOpen = elements.appShell.classList.contains("navigation-open");
+    elements.appShell.classList.remove("navigation-open");
+    document.body.classList.remove("navigation-locked");
+    elements.sidebarBackdrop.hidden = true;
+    elements.sidebarToggle.setAttribute("aria-expanded", "false");
+    if (window.matchMedia("(max-width: 800px)").matches) {
+        elements.sidebarToggle.setAttribute("aria-label", "Open workspace navigation");
+    } else {
+        const collapsed = elements.appShell.classList.contains("sidebar-collapsed");
+        elements.sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
+        elements.sidebarToggle.setAttribute(
+            "aria-label",
+            collapsed ? "Expand workspace navigation" : "Collapse workspace navigation"
+        );
+    }
+    if (wasOpen && restoreFocus) elements.sidebarToggle.focus();
+}
+
+function closeProfileMenu(restoreFocus = true) {
+    if (!elements.profileMenu || elements.profileMenu.hidden) return;
+    elements.profileMenu.hidden = true;
+    elements.profileMenuToggle.setAttribute("aria-expanded", "false");
+    if (restoreFocus) elements.profileMenuToggle.focus();
+}
+
+function initializeNavigationControls() {
+    const isMobile = () => window.matchMedia("(max-width: 800px)").matches;
+
+    elements.sidebarToggle.addEventListener("click", () => {
+        if (isMobile()) {
+            const opening = !elements.appShell.classList.contains("navigation-open");
+            if (opening) {
+                elements.appShell.classList.add("navigation-open");
+                document.body.classList.add("navigation-locked");
+                elements.sidebarBackdrop.hidden = false;
+                elements.sidebarToggle.setAttribute("aria-expanded", "true");
+                elements.sidebarToggle.setAttribute("aria-label", "Close workspace navigation");
+                elements.sidebar.querySelector(".nav-item:not([hidden])")?.focus();
+            } else {
+                closeMobileNavigation();
+            }
+            return;
+        }
+
+        const collapsed = elements.appShell.classList.toggle("sidebar-collapsed");
+        elements.sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
+        elements.sidebarToggle.setAttribute(
+            "aria-label",
+            collapsed ? "Expand workspace navigation" : "Collapse workspace navigation"
+        );
+    });
+
+    elements.sidebarBackdrop.addEventListener("click", () => closeMobileNavigation());
+
+    elements.sidebar.querySelectorAll(".nav-item").forEach((link) => {
+        link.addEventListener("click", () => {
+            elements.sidebar.querySelectorAll(".nav-item").forEach((item) => {
+                item.classList.toggle("active", item === link);
+            });
+            if (isMobile()) closeMobileNavigation(false);
+
+            const target = document.querySelector(link.getAttribute("href"));
+            if (target) {
+                target.setAttribute("tabindex", "-1");
+                window.setTimeout(() => target.focus({ preventScroll: true }), 0);
+            }
+        });
+    });
+
+    elements.profileMenuToggle.addEventListener("click", () => {
+        const opening = elements.profileMenu.hidden;
+        elements.profileMenu.hidden = !opening;
+        elements.profileMenuToggle.setAttribute("aria-expanded", String(opening));
+        if (opening) {
+            elements.profileMenu.querySelector("a:not([hidden]), button:not([hidden])")?.focus();
+        }
+    });
+
+    document.addEventListener("click", (event) => {
+        if (!elements.userProfile.contains(event.target)) closeProfileMenu(false);
+    });
+
+    document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+            if (elements.appShell.classList.contains("navigation-open")) {
+                closeMobileNavigation();
+            } else {
+                closeProfileMenu();
+            }
+            return;
+        }
+
+        if (event.key !== "Tab" || !elements.appShell.classList.contains("navigation-open")) {
+            return;
+        }
+
+        const focusable = Array.from(
+            elements.sidebar.querySelectorAll("a[href], button:not(:disabled)")
+        ).filter((item) => !item.closest("[hidden]"));
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+        }
+    });
+
+    window.addEventListener("resize", () => closeMobileNavigation(false));
+
+    if (!isMobile()) {
+        elements.sidebarToggle.setAttribute("aria-label", "Collapse workspace navigation");
+        elements.sidebarToggle.setAttribute("aria-expanded", "true");
+    }
+}
 
 /* 05. Message handling
    --------------------------------------------------------- */
@@ -250,6 +382,12 @@ function showLogin(messageText = "") {
     elements.dashboardView.hidden = true;
     elements.footerView.hidden = true;
     elements.userProfile.hidden = true;
+    elements.workspaceContext.hidden = true;
+    elements.sidebarToggle.hidden = true;
+    elements.analysisNavigation.hidden = true;
+    elements.workspaceWelcome.hidden = false;
+    closeMobileNavigation(false);
+    closeProfileMenu(false);
 
     showLoginMessage(messageText);
 }
@@ -259,8 +397,26 @@ function showDashboard(user) {
     elements.dashboardView.hidden = false;
     elements.footerView.hidden = false;
     elements.userProfile.hidden = false;
+    elements.sidebarToggle.hidden = false;
+    elements.analysisNavigation.hidden =
+        !document.getElementById("repository-result");
+    elements.workspaceContext.hidden =
+        !document.getElementById("repository-result");
+    elements.workspaceWelcome.hidden =
+        Boolean(document.getElementById("repository-result"));
+    document.querySelector("[data-analysis-link]").hidden =
+        !document.getElementById("repository-result");
 
     elements.userName.textContent = user.name || user.username || "GitHub user";
+    const profileUrl = user.username
+        ? safeGitHubUrl(`https://github.com/${encodeURIComponent(user.username)}`)
+        : null;
+    if (profileUrl) {
+        elements.userProfileLink.href = profileUrl;
+        elements.userProfileLink.hidden = false;
+    } else {
+        elements.userProfileLink.hidden = true;
+    }
 
     if (user.avatarUrl) {
         elements.userAvatar.src = user.avatarUrl;
@@ -439,6 +595,16 @@ function validateGitHubRepository(input) {
 
 function removeRepositoryResult() {
     document.getElementById("repository-result")?.remove();
+    document.querySelectorAll("[data-codebase-target]").forEach((link) => {
+        link.setAttribute("href", "#codebase-panel");
+    });
+    elements.workspaceWelcome.hidden = false;
+    elements.workspaceContext.hidden = true;
+    elements.analysisNavigation.hidden = true;
+    document.querySelector("[data-analysis-link]").hidden = true;
+    document.querySelectorAll(".sidebar-nav .nav-item").forEach((item) => {
+        item.classList.toggle("active", item.getAttribute("href") === "#workspace-overview");
+    });
 }
 
 function showRepositoryResult(repository) {
@@ -451,6 +617,7 @@ function showRepositoryResult(repository) {
         );
 
         resultSection.id = "repository-result";
+        resultSection.setAttribute("aria-labelledby", "repository-result-heading");
 
         elements.repoForm.insertAdjacentElement(
             "afterend",
@@ -466,6 +633,7 @@ function showRepositoryResult(repository) {
         "",
         repository.full_name || repository.name || "Repository"
     );
+    headingTitle.id = "repository-result-heading";
     const repositoryLink = safeGitHubUrl(repository.html_url);
     if (repositoryLink) {
         const link = createElement("a", "repository-github-link", "View on GitHub ↗");
@@ -535,9 +703,17 @@ function showRepositoryResult(repository) {
     }
 
     resultSection.append(heading, description, metadata, statsContainer);
+    elements.workspaceWelcome.hidden = true;
+    elements.workspaceContext.hidden = false;
+    elements.workspaceRepositoryContext.textContent =
+        repository.full_name || repository.name || "Repository workspace";
+    elements.analysisNavigation.hidden = false;
+    document.querySelector("[data-analysis-link]").hidden = false;
 
     resultSection.scrollIntoView({
-        behavior: "smooth",
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+            ? "auto"
+            : "smooth",
         block: "nearest",
     });
 }
@@ -582,6 +758,7 @@ function formatTimestamp(value) {
 
 function createInsightPanel(className, title, description) {
     const panel = createElement("section", `insight-panel ${className}`);
+    panel.id = className.split(/\s+/)[0];
     const heading = createElement("div", "insight-heading");
     heading.append(
         createElement("h3", "", title),
@@ -1372,6 +1549,10 @@ function loadDeveloperIntelligence(container, repositoryUrl, requestId) {
     const pullRequests = createElement("section", "developer-card");
     const issues = createElement("section", "developer-card");
     const profileContainer = createElement("section", "developer-profile-card");
+    leaderboard.id = "developer-contributors";
+    pullRequests.id = "developer-pull-requests";
+    issues.id = "developer-issues";
+    profileContainer.id = "developer-profile";
     const leaderboardBody = createElement("div", "developer-card-body");
     const pullRequestBody = createElement("div", "developer-card-body");
     const issueBody = createElement("div", "developer-card-body");
@@ -1491,6 +1672,7 @@ function renderCodebase(container, data) {
     }
 
     const breakdowns = createElement("div", "codebase-breakdowns");
+    breakdowns.id = "codebase-composition";
     breakdowns.append(
         renderTypeBreakdown("File categories", composition.categories || []),
         renderTypeBreakdown("File extensions", composition.extensions || [])
@@ -1503,6 +1685,7 @@ function renderCodebase(container, data) {
     container.append(breakdowns);
 
     const directoryPanel = createElement("section", "codebase-subsection");
+    directoryPanel.id = "codebase-directories";
     directoryPanel.append(
         createElement("h4", "", "Directory size distribution"),
         createElement(
@@ -1563,6 +1746,7 @@ function renderCodebase(container, data) {
     container.append(directoryPanel);
 
     const explorer = createElement("section", "codebase-subsection");
+    explorer.id = "codebase-explorer";
     explorer.append(
         createElement("h4", "", "File explorer"),
         createElement(
@@ -1670,6 +1854,7 @@ function renderCodebase(container, data) {
     container.append(explorer);
 
     const largestSection = createElement("section", "codebase-subsection");
+    largestSection.id = "codebase-largest-files";
     largestSection.append(
         createElement("h4", "", "Largest files"),
         createElement(
@@ -1745,6 +1930,12 @@ function renderCodebase(container, data) {
         "insight-limitation",
         data.limitations || "Repository structure data may be incomplete."
     ));
+    document.querySelectorAll("[data-codebase-target]").forEach((link) => {
+        const targetId = link.getAttribute("data-codebase-target");
+        if (document.getElementById(targetId)) {
+            link.setAttribute("href", `#${targetId}`);
+        }
+    });
 }
 
 function renderTypeBreakdown(title, values) {
@@ -2146,6 +2337,11 @@ function setAnalyzing(isAnalyzing) {
     elements.analyzeButton.disabled = isAnalyzing;
     elements.repoInput.disabled = isAnalyzing;
     elements.clearButton.disabled = isAnalyzing;
+    if (isAnalyzing) {
+        elements.workspaceWelcome.hidden = true;
+    } else if (!document.getElementById("repository-result")) {
+        elements.workspaceWelcome.hidden = false;
+    }
 
     const buttonText = elements.analyzeButton.querySelector(".button-text");
 
@@ -2294,6 +2490,13 @@ function initializeSearchControls() {
 
 function initializeAuthenticationControls() {
     elements.logoutButton.addEventListener("click", logout);
+    initializeNavigationControls();
+    document.querySelectorAll("[data-github-login]").forEach((link) => {
+        link.addEventListener("click", () => {
+            link.setAttribute("aria-busy", "true");
+            showLoginMessage("Connecting to GitHub...");
+        });
+    });
 }
 
 
