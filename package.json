@@ -6,7 +6,8 @@
   "scripts": {
     "build:css": "tailwindcss -i frontend/css/tailwind.css -o frontend/css/tailwind.generated.css --minify",
     "watch:css": "tailwindcss -i frontend/css/tailwind.css -o frontend/css/tailwind.generated.css --watch",
-    "check:frontend": "node --check frontend/js/app.js && npm run build:css"
+    "check:frontend": "node --check frontend/js/app.js && npm run build:css",
+    "test:frontend": "node --test frontend/test/*.test.cjs"
   },
   "repository": {
     "type": "git",

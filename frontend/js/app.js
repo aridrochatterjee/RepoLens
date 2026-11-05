@@ -118,6 +118,8 @@ const CONFIG = {
     ],
 };
 
+const COMMIT_PAGE_LIMIT = 30;
+
 
 /* 03. Shared utilities
    --------------------------------------------------------- */
@@ -1104,7 +1106,7 @@ function loadCommitAnalyticsWorkspace() {
         const params = {
             ...commitFilters,
             page: String(pageNumber),
-            limit: "30",
+            limit: String(COMMIT_PAGE_LIMIT),
         };
         loadCommitPage(
             historyBody,
@@ -1153,9 +1155,18 @@ function loadCommitAnalyticsWorkspace() {
                 since: sinceDate,
                 until: untilDate,
                 page: "1",
-                limit: "100",
+                limit: String(COMMIT_PAGE_LIMIT),
             }
             : { period: String(periodDays) };
+        if (username) {
+            heatmap.replaceChildren(
+                createElement(
+                    "p",
+                    "insight-loading",
+                    `Loading @${username}'s commit activity…`
+                )
+            );
+        }
         void requestInsight(endpoint, applicationState.repositoryUrl, requestId, parameters)
             .then((data) => {
                 if (!data || requestId !== analysisRequestId
@@ -1552,7 +1563,10 @@ function renderContributorCommitHeatmap(
             counts.set(day, (counts.get(day) || 0) + 1);
         }
     });
-    const partial = (commitPage.commits || []).length >= 100;
+    const limit = Number(commitPage.limit);
+    const partial = Number.isFinite(limit)
+        && limit > 0
+        && (commitPage.commits || []).length >= limit;
     const first = new Date(`${since}T00:00:00Z`);
     const dailyActivity = [];
     for (let offset = 0; offset < periodDays; offset++) {
@@ -1572,7 +1586,7 @@ function renderContributorCommitHeatmap(
         `@${username} · returned commits in the last ${periodDays} days`,
         partial,
         partial
-            ? "GitHub returned a capped sample of 100 commits. Counts are limited to that sample; dates without returned commits are unknown, not zero."
+            ? `GitHub returned ${limit} commits, the per-request limit. Results may be incomplete; dates without returned commits are unknown, not zero.`
             : null
     );
 }

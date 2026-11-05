@@ -45,6 +45,22 @@ class RepositoryControllerValidationTest {
     }
 
     @Test
+    void acceptsMaximumCommitPageSizeAndRejectsTheNextValue() {
+        var pagination = controller.parsePagination(
+                Map.of("page", "1", "limit", "30")
+        );
+        assertEquals(30, pagination.limit());
+
+        IllegalArgumentException exception = assertThrows(
+                IllegalArgumentException.class,
+                () -> controller.parsePagination(
+                        Map.of("page", "1", "limit", "31")
+                )
+        );
+        assertEquals("Limit must be between 1 and 30.", exception.getMessage());
+    }
+
+    @Test
     void acceptsFiftyTwoWeekActivityAndRejectsUnsupportedPeriods() {
         assertEquals(364, controller.parsePeriod("364"));
         assertThrows(

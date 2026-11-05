@@ -177,9 +177,28 @@ class RepositoryFileEndpointTest {
                 mapper.readTree(response.body()).path("commits")
                         .get(0).path("author").asText()
         );
+        assertEquals(30, mapper.readTree(response.body()).path("limit").asInt());
         assertEquals("octocat", github.commitAuthor);
         assertEquals("2026-03-01T00:00:00Z", github.commitSince);
         assertEquals("2026-03-07T23:59:59.999999999Z", github.commitUntil);
+    }
+
+    @Test
+    void rejectsCommitPageSizeAboveTheSupportedMaximumOverHttp()
+            throws Exception {
+        HttpResponse<String> response = request(
+                "/api/repository/commits?url=" + encode(REPOSITORY_URL)
+                        + "&author=octocat&since=2026-03-01&until=2026-03-07"
+                        + "&page=1&limit=31",
+                true
+        );
+
+        assertEquals(400, response.statusCode());
+        assertEquals(
+                "Limit must be between 1 and 30.",
+                mapper.readTree(response.body()).path("error").asText()
+        );
+        assertEquals(0, github.commitRequests);
     }
 
     private HttpResponse<String> request(String path, boolean authenticated)
@@ -210,6 +229,7 @@ class RepositoryFileEndpointTest {
         private String commitAuthor;
         private String commitSince;
         private String commitUntil;
+        private int commitRequests;
 
         @Override
         public JsonNode getRepository(String owner, String name, String token) {
@@ -242,6 +262,7 @@ class RepositoryFileEndpointTest {
                 String since,
                 String until
         ) {
+            commitRequests++;
             commitAuthor = author;
             commitSince = since;
             commitUntil = until;
