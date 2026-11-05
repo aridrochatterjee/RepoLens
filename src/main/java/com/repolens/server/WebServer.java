@@ -1,6 +1,7 @@
 
 package com.repolens.server;
 
+import com.repolens.auth.ExpirationCleanupService;
 import com.repolens.auth.SessionManager;
 import com.repolens.controller.OAuthController;
 import com.repolens.controller.RepositoryController;
@@ -26,6 +27,7 @@ public class WebServer {
     private final OAuthController oauthController;
     private final RepositoryController repositoryController;
     private final SessionManager sessionManager;
+    private final ExpirationCleanupService expirationCleanupService;
 
     private HttpServer server;
     private ExecutorService executor;
@@ -49,18 +51,37 @@ public class WebServer {
             RepositoryController repositoryController,
             SessionManager sessionManager
     ) {
+        this(
+                port,
+                bindAddress,
+                oauthController,
+                repositoryController,
+                sessionManager,
+                null
+        );
+    }
+
+    public WebServer(
+            int port,
+            InetAddress bindAddress,
+            OAuthController oauthController,
+            RepositoryController repositoryController,
+            SessionManager sessionManager,
+            ExpirationCleanupService expirationCleanupService
+    ) {
         this.port = port;
         this.bindAddress = bindAddress;
         this.oauthController = oauthController;
         this.repositoryController = repositoryController;
         this.sessionManager = sessionManager;
+        this.expirationCleanupService = expirationCleanupService;
 
         this.frontendDirectory = Path.of("frontend")
                 .toAbsolutePath()
                 .normalize();
     }
 
-    public void start() {
+    public synchronized void start() {
         try {
             server = HttpServer.create(
                     new InetSocketAddress(bindAddress, port),
@@ -185,6 +206,14 @@ public class WebServer {
             server.setExecutor(executor);
 
             server.start();
+            if (expirationCleanupService != null) {
+                try {
+                    expirationCleanupService.start();
+                } catch (RuntimeException exception) {
+                    stop();
+                    throw exception;
+                }
+            }
 
             System.out.println(
                     "RepoLens running at http://localhost:"
@@ -206,14 +235,23 @@ public class WebServer {
         return server.getAddress().getPort();
     }
 
-    public void stop() {
-        if (server != null) {
-            server.stop(0);
+    public synchronized void stop() {
+        try {
+            if (server != null) {
+                server.stop(0);
+            }
+        } finally {
             server = null;
-        }
-        if (executor != null) {
-            executor.shutdownNow();
-            executor = null;
+            try {
+                if (executor != null) {
+                    executor.shutdownNow();
+                }
+            } finally {
+                executor = null;
+                if (expirationCleanupService != null) {
+                    expirationCleanupService.stop();
+                }
+            }
         }
     }
 

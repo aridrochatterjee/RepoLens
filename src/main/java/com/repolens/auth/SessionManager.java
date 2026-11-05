@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class SessionManager {
 
@@ -69,6 +70,24 @@ public class SessionManager {
         if (sessionId != null && !sessionId.isBlank()) {
             sessions.remove(sessionId);
         }
+    }
+
+    public int removeExpiredSessions() {
+        Instant now = clock.instant();
+        AtomicInteger removed = new AtomicInteger();
+        sessions.forEach((sessionId, observedSession) -> {
+            if (!now.isBefore(observedSession.expiresAt())) {
+                sessions.computeIfPresent(sessionId, (ignored, currentSession) -> {
+                    if (currentSession == observedSession
+                            && !now.isBefore(currentSession.expiresAt())) {
+                        removed.incrementAndGet();
+                        return null;
+                    }
+                    return currentSession;
+                });
+            }
+        });
+        return removed.get();
     }
 
     public boolean isAuthenticated(String sessionId) {

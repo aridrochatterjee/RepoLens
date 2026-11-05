@@ -2,10 +2,12 @@
 package com.repolens.auth;
 
 import java.security.SecureRandom;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class OAuthStateManager {
 
@@ -13,9 +15,18 @@ public class OAuthStateManager {
     private static final long STATE_LIFETIME_SECONDS = 300;
 
     private final SecureRandom secureRandom = new SecureRandom();
+    private final Clock clock;
 
     private final Map<String, Instant> states =
             new ConcurrentHashMap<>();
+
+    public OAuthStateManager() {
+        this(Clock.systemUTC());
+    }
+
+    OAuthStateManager(Clock clock) {
+        this.clock = clock;
+    }
 
     public String createState() {
         byte[] randomBytes = new byte[STATE_BYTES];
@@ -25,7 +36,7 @@ public class OAuthStateManager {
                 .withoutPadding()
                 .encodeToString(randomBytes);
 
-        states.put(state, Instant.now());
+        states.put(state, clock.instant());
 
         return state;
     }
@@ -41,17 +52,20 @@ public class OAuthStateManager {
             return false;
         }
 
-        return Instant.now().isBefore(
+        return clock.instant().isBefore(
                 createdAt.plusSeconds(STATE_LIFETIME_SECONDS)
         );
     }
 
-    public void removeExpiredStates() {
-        Instant expirationTime = Instant.now()
-                .minusSeconds(STATE_LIFETIME_SECONDS);
-
-        states.entrySet().removeIf(
-                entry -> entry.getValue().isBefore(expirationTime)
-        );
+    public int removeExpiredStates() {
+        Instant now = clock.instant();
+        AtomicInteger removed = new AtomicInteger();
+        states.forEach((state, createdAt) -> {
+            if (!now.isBefore(createdAt.plusSeconds(STATE_LIFETIME_SECONDS))
+                    && states.remove(state, createdAt)) {
+                removed.incrementAndGet();
+            }
+        });
+        return removed.get();
     }
 }

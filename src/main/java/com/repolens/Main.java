@@ -1,6 +1,7 @@
 
 package com.repolens;
 
+import com.repolens.auth.ExpirationCleanupService;
 import com.repolens.auth.GitHubOAuthService;
 import com.repolens.auth.OAuthStateManager;
 import com.repolens.auth.SessionManager;
@@ -27,6 +28,9 @@ public class Main {
 
         OAuthStateManager stateManager =
                 new OAuthStateManager();
+
+        ExpirationCleanupService expirationCleanupService =
+                new ExpirationCleanupService(stateManager, sessionManager);
 
         OAuthController oauthController =
                 new OAuthController(
@@ -67,9 +71,13 @@ public class Main {
                         InetAddress.getLoopbackAddress(),
                         oauthController,
                         repositoryController,
-                        sessionManager
+                        sessionManager,
+                        expirationCleanupService
                 );
 
+        Runtime.getRuntime().addShutdownHook(
+                new Thread(server::stop, "repolens-shutdown")
+        );
         server.start();
     }
 }
